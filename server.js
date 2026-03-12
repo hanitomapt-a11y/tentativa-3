@@ -4,6 +4,7 @@ const express = require("express");
 const cors = require("cors");
 const nodemailer = require("nodemailer");
 const PDFDocument = require("pdfkit");
+const pool = require("./db");
 
 const app = express();
 
@@ -429,7 +430,6 @@ function gerarPdfOrcamento(payload, calc) {
         .text(text, x, y, { width, align });
     }
 
-    // Página 1
     drawText(centerX, 30, "GUIA LAR – Loja de Decoração", {
       size: 13,
       align: "center",
@@ -552,7 +552,6 @@ function gerarPdfOrcamento(payload, calc) {
       align: "center"
     });
 
-    // Página 2
     doc.addPage();
 
     drawText(centerX, 35, "GUIA LAR – Loja de Decoração", {
