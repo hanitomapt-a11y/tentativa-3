@@ -175,8 +175,7 @@ const CONFIG = {
   servicos: {
     verificacaoMedidas: 25,
     instalacaoCortinado: 65,
-    instalacaoEstore: 45,
-    confecaoBase: 100
+    instalacaoEstore: 45
   }
 };
 
@@ -206,6 +205,34 @@ function formatEuro(valor) {
 
 function textoSimNao(valor) {
   return valor === "sim" ? "Sim" : "Não";
+}
+
+function formatQuantidade(valor) {
+  if (typeof valor !== "number") return String(valor || "");
+  return Number.isInteger(valor)
+    ? String(valor)
+    : valor.toFixed(2).replace(".", ",");
+}
+
+function calcularQuantidadeGanchos(tamanhoCalhaM) {
+  let q = tamanhoCalhaM / 0.065;
+  q = Math.floor(q);
+  if (q % 2 !== 0) q += 1;
+  return q;
+}
+
+function calcularValorConfecao(metrosTecido) {
+  if (metrosTecido <= 5) return 60;
+  if (metrosTecido <= 7) return 70;
+  if (metrosTecido <= 8) return 80;
+  if (metrosTecido <= 9) return 90;
+  return metrosTecido * 10;
+}
+
+function calcularValorColocacao(tamanhoCalhaM) {
+  if (tamanhoCalhaM <= 1.5) return 15;
+  if (tamanhoCalhaM <= 4.0) return 20;
+  return 25;
 }
 
 function validarPayload(body) {
@@ -246,17 +273,9 @@ function validarPayload(body) {
   if (Number(larguraCm) <= 0) return "Largura inválida.";
   if (Number(alturaCm) <= 0) return "Altura inválida.";
 
-  if (!["sim", "nao"].includes(verificacaoMedidas)) {
-    return "Verificação de medidas inválida.";
-  }
-
-  if (!["sim", "nao"].includes(instalacao)) {
-    return "Instalação inválida.";
-  }
-
-  if (!["sim", "nao"].includes(cliente.podeContactar)) {
-    return "Opção de contacto inválida.";
-  }
+  if (!["sim", "nao"].includes(verificacaoMedidas)) return "Verificação de medidas inválida.";
+  if (!["sim", "nao"].includes(instalacao)) return "Instalação inválida.";
+  if (!["sim", "nao"].includes(cliente.podeContactar)) return "Opção de contacto inválida.";
 
   if (tipo === "cortinado") {
     if (!existeValor(tipoCortinaId)) return "Falta o tipo de cortina.";
@@ -281,95 +300,135 @@ function calcularOrcamento(payload) {
   const alturaM = Number(payload.alturaCm) / 100;
   const area = larguraM * alturaM;
 
-  let total = 0;
   const linhas = [];
+  let total = 0;
 
   if (payload.tipo === "cortinado") {
-    const metragemTecido = area * tipoCortina.fatorConsumo;
-    const subtotalTecido = metragemTecido * produto.precoM2;
-    const subtotalCalha = larguraM * calha.precoMl;
-    const subtotalConfecao = CONFIG.servicos.confecaoBase;
+    const tamanhoCalhaM = larguraM;
+    const tamanhoCalhaCm = Number(payload.larguraCm);
 
-    total += subtotalTecido + subtotalCalha + subtotalConfecao;
+    // 1. CALHA
+    let valorUnitarioCalha = (calha.precoMl * tamanhoCalhaM) + 6;
+    if (tamanhoCalhaM > 4) {
+      valorUnitarioCalha += 7;
+    }
+    valorUnitarioCalha = valorUnitarioCalha * 1.23;
 
     linhas.push({
-      divisao: "Janela",
-      qt: "1",
-      descricao: `${calha.nome} c/${larguraM.toFixed(2)} ml (${payload.fixacaoCalha})`,
-      unitario: calha.precoMl,
-      total: subtotalCalha
+      divisao: "Sala",
+      qt: 1,
+      descricao: `${calha.nome} c/${tamanhoCalhaCm}m`,
+      unitario: valorUnitarioCalha,
+      total: valorUnitarioCalha
     });
+
+    // 2. GANCHOS
+    const quantidadeGanchos = calcularQuantidadeGanchos(tamanhoCalhaM);
+    const valorUnitarioGanchos = 0.10;
+    const valorTotalGanchos = quantidadeGanchos * valorUnitarioGanchos;
 
     linhas.push({
       divisao: "",
-      qt: metragemTecido.toFixed(2),
-      descricao: `Tecido "${produto.nome}"`,
-      unitario: produto.precoM2,
-      total: subtotalTecido
+      qt: quantidadeGanchos,
+      descricao: "Ganchos Plus",
+      unitario: valorUnitarioGanchos,
+      total: valorTotalGanchos
     });
+
+    // 3. TECIDO
+    const quantidadeTecido = (tamanhoCalhaM * 2.5) + 0.30;
+    const valorUnitarioTecido = produto.precoM2;
+    const valorTotalTecido = quantidadeTecido * valorUnitarioTecido;
 
     linhas.push({
       divisao: "",
-      qt: "1",
-      descricao: `Confeção ${tipoCortina.nome}`,
-      unitario: subtotalConfecao,
-      total: subtotalConfecao
+      qt: quantidadeTecido,
+      descricao: produto.nome,
+      unitario: valorUnitarioTecido,
+      total: valorTotalTecido
     });
 
-    if (payload.verificacaoMedidas === "sim") {
-      total += CONFIG.servicos.verificacaoMedidas;
-      linhas.push({
-        divisao: "",
-        qt: "1",
-        descricao: "Verificação de medidas",
-        unitario: CONFIG.servicos.verificacaoMedidas,
-        total: CONFIG.servicos.verificacaoMedidas
-      });
-    }
-
-    if (payload.instalacao === "sim") {
-      total += CONFIG.servicos.instalacaoCortinado;
-      linhas.push({
-        divisao: "",
-        qt: "1",
-        descricao: "Colocação e montagem",
-        unitario: CONFIG.servicos.instalacaoCortinado,
-        total: CONFIG.servicos.instalacaoCortinado
-      });
-    }
-  } else {
-    const subtotalProduto = area * produto.precoM2;
-    total += subtotalProduto;
+    // 4. FITA ONDA
+    const quantidadeFita = quantidadeTecido;
+    const valorUnitarioFita = 1.5;
+    const valorTotalFita = quantidadeFita * valorUnitarioFita;
 
     linhas.push({
-      divisao: "Janela",
-      qt: area.toFixed(2),
-      descricao: `${tipo.nome} "${produto.nome}"`,
-      unitario: produto.precoM2,
-      total: subtotalProduto
+      divisao: "",
+      qt: quantidadeFita,
+      descricao: "Fita Onda",
+      unitario: valorUnitarioFita,
+      total: valorTotalFita
     });
 
-    if (payload.verificacaoMedidas === "sim") {
-      total += CONFIG.servicos.verificacaoMedidas;
-      linhas.push({
-        divisao: "",
-        qt: "1",
-        descricao: "Verificação de medidas",
-        unitario: CONFIG.servicos.verificacaoMedidas,
-        total: CONFIG.servicos.verificacaoMedidas
-      });
-    }
+    // 5. CONFEÇÃO
+    const valorUnitarioConfecao = calcularValorConfecao(quantidadeTecido);
 
-    if (payload.instalacao === "sim") {
-      total += CONFIG.servicos.instalacaoEstore;
-      linhas.push({
-        divisao: "",
-        qt: "1",
-        descricao: "Colocação e montagem",
-        unitario: CONFIG.servicos.instalacaoEstore,
-        total: CONFIG.servicos.instalacaoEstore
-      });
-    }
+    linhas.push({
+      divisao: "",
+      qt: 1,
+      descricao: "Confeção",
+      unitario: valorUnitarioConfecao,
+      total: valorUnitarioConfecao
+    });
+
+    // 6. COLOCAÇÃO E MONTAGEM
+    const valorUnitarioColocacao = calcularValorColocacao(tamanhoCalhaM);
+
+    linhas.push({
+      divisao: "",
+      qt: 1,
+      descricao: "Colocação e Montagem",
+      unitario: valorUnitarioColocacao,
+      total: valorUnitarioColocacao
+    });
+
+    total = linhas.reduce((acc, linha) => acc + linha.total, 0);
+
+    return {
+      tipo,
+      produto,
+      tipoCortina,
+      calha,
+      total,
+      area,
+      larguraM,
+      alturaM,
+      linhas
+    };
+  }
+
+  const subtotalProduto = area * produto.precoM2;
+  total += subtotalProduto;
+
+  linhas.push({
+    divisao: "Sala",
+    qt: area,
+    descricao: `${tipo.nome} "${produto.nome}"`,
+    unitario: produto.precoM2,
+    total: subtotalProduto
+  });
+
+  if (payload.verificacaoMedidas === "sim") {
+    total += CONFIG.servicos.verificacaoMedidas;
+    linhas.push({
+      divisao: "",
+      qt: 1,
+      descricao: "Verificação de Medidas",
+      unitario: CONFIG.servicos.verificacaoMedidas,
+      total: CONFIG.servicos.verificacaoMedidas
+    });
+  }
+
+  if (payload.instalacao === "sim") {
+    total += CONFIG.servicos.instalacaoEstore;
+    linhas.push({
+      divisao: "",
+      qt: 1,
+      descricao: "Colocação e Montagem",
+      unitario: CONFIG.servicos.instalacaoEstore,
+      total: CONFIG.servicos.instalacaoEstore
+    });
   }
 
   return {
@@ -379,6 +438,8 @@ function calcularOrcamento(payload) {
     calha,
     total,
     area,
+    larguraM,
+    alturaM,
     linhas
   };
 }
@@ -402,22 +463,8 @@ function gerarPdfOrcamento(payload, calc) {
       year: "numeric"
     });
 
-    const produto = encontrarProduto(payload.tipo, payload.produtoId);
-    const tipo = encontrarTipo(payload.tipo);
-    const tipoCortina = payload.tipoCortinaId ? encontrarTipoCortina(payload.tipoCortinaId) : null;
-    const calha = payload.calhaId ? encontrarCalha(payload.calhaId) : null;
-
-    const larguraM = Number(payload.larguraCm) / 100;
-    const alturaM = Number(payload.alturaCm) / 100;
-    const area = larguraM * alturaM;
-
-    function euro(v) {
-      return Number(v || 0).toFixed(2).replace(".", ",") + "€";
-    }
-
     function drawCell(x, y, w, h, text, opts = {}) {
       const {
-        font = "Helvetica",
         size = 9,
         align = "center",
         bold = false,
@@ -432,7 +479,7 @@ function gerarPdfOrcamento(payload, calc) {
 
       doc.rect(x, y, w, h).stroke();
 
-      doc.font(bold ? "Helvetica-Bold" : font)
+      doc.font(bold ? "Helvetica-Bold" : "Helvetica")
         .fontSize(size)
         .text(text || "", x + padding, y + padding, {
           width: w - padding * 2,
@@ -443,14 +490,13 @@ function gerarPdfOrcamento(payload, calc) {
 
     function drawText(x, y, text, opts = {}) {
       const {
-        font = "Helvetica",
         size = 10,
         align = "left",
         width = 500,
         bold = false
       } = opts;
 
-      doc.font(bold ? "Helvetica-Bold" : font)
+      doc.font(bold ? "Helvetica-Bold" : "Helvetica")
         .fontSize(size)
         .text(text, x, y, { width, align });
     }
@@ -471,103 +517,15 @@ function gerarPdfOrcamento(payload, calc) {
       const cellHeight = Math.max(minHeight, descHeight + 8);
 
       drawCell(xDiv, y, wDiv, cellHeight, row.divisao || "", { size: 9 });
-      drawCell(xQt, y, wQt, cellHeight, String(row.qt || ""), { size: 9 });
+      drawCell(xQt, y, wQt, cellHeight, formatQuantidade(row.qt), { size: 9 });
       drawCell(xDesc, y, wDesc, cellHeight, row.descricao || "", { size: 9, align: "center" });
-      drawCell(xUnit, y, wUnit, cellHeight, row.unitarioTexto || "", { size: 9 });
-      drawCell(xTot, y, wTot, cellHeight, row.totalTexto || "", { size: 9 });
+      drawCell(xUnit, y, wUnit, cellHeight, formatEuro(row.unitario), { size: 9 });
+      drawCell(xTot, y, wTot, cellHeight, formatEuro(row.total), { size: 9 });
 
       return cellHeight;
     }
 
-    const linhasTabela = [];
-
-    if (payload.tipo === "cortinado") {
-      const metragemTecido = area * tipoCortina.fatorConsumo;
-      const subtotalTecido = metragemTecido * produto.precoM2;
-      const subtotalCalha = larguraM * calha.precoMl;
-      const subtotalConfecao = 100;
-
-      linhasTabela.push({
-        divisao: "Sala",
-        qt: "1",
-        descricao: `${calha.nome} c/${larguraM.toFixed(2).replace(".", ",")}l`,
-        unitarioTexto: euro(calha.precoMl),
-        totalTexto: euro(subtotalCalha)
-      });
-
-      linhasTabela.push({
-        divisao: "",
-        qt: metragemTecido.toFixed(2).replace(".", ","),
-        descricao: `Tecido "${produto.nome}"`,
-        unitarioTexto: euro(produto.precoM2),
-        totalTexto: euro(subtotalTecido)
-      });
-
-      linhasTabela.push({
-        divisao: "",
-        qt: "1",
-        descricao: `Confeção ${tipoCortina.nome}`,
-        unitarioTexto: euro(subtotalConfecao),
-        totalTexto: euro(subtotalConfecao)
-      });
-
-      if (payload.verificacaoMedidas === "sim") {
-        linhasTabela.push({
-          divisao: "",
-          qt: "1",
-          descricao: "Verificação de Medidas",
-          unitarioTexto: euro(CONFIG.servicos.verificacaoMedidas),
-          totalTexto: euro(CONFIG.servicos.verificacaoMedidas)
-        });
-      }
-
-      if (payload.instalacao === "sim") {
-        linhasTabela.push({
-          divisao: "",
-          qt: "1",
-          descricao: "Colocação e Montagem",
-          unitarioTexto: euro(CONFIG.servicos.instalacaoCortinado),
-          totalTexto: euro(CONFIG.servicos.instalacaoCortinado)
-        });
-      }
-    } else {
-      const subtotalProduto = area * produto.precoM2;
-
-      linhasTabela.push({
-        divisao: "Sala",
-        qt: area.toFixed(2).replace(".", ","),
-        descricao: `${tipo.nome} "${produto.nome}"`,
-        unitarioTexto: euro(produto.precoM2),
-        totalTexto: euro(subtotalProduto)
-      });
-
-      if (payload.verificacaoMedidas === "sim") {
-        linhasTabela.push({
-          divisao: "",
-          qt: "1",
-          descricao: "Verificação de Medidas",
-          unitarioTexto: euro(CONFIG.servicos.verificacaoMedidas),
-          totalTexto: euro(CONFIG.servicos.verificacaoMedidas)
-        });
-      }
-
-      if (payload.instalacao === "sim") {
-        linhasTabela.push({
-          divisao: "",
-          qt: "1",
-          descricao: "Colocação e Montagem",
-          unitarioTexto: euro(CONFIG.servicos.instalacaoEstore),
-          totalTexto: euro(CONFIG.servicos.instalacaoEstore)
-        });
-      }
-    }
-
-    const subtotal = calc.total;
-    const total = calc.total;
-
-    // Página 1
     drawText(0, 30, "GUIA LAR – Loja de Decoração", {
-      bold: false,
       size: 13,
       align: "center",
       width: 595 - 100
@@ -597,7 +555,6 @@ function gerarPdfOrcamento(payload, calc) {
       { size: 10, width: 430 }
     );
 
-    // Tabela
     const xDiv = 70;
     const xQt = 118;
     const xDesc = 152;
@@ -616,32 +573,15 @@ function gerarPdfOrcamento(payload, calc) {
 
     y += headerH;
 
-    linhasTabela.forEach((row) => {
+    calc.linhas.forEach((row) => {
       const h = addWrappedRow(row, xPositions, y, 22);
       y += h;
     });
 
-    // Totais à direita
     const totalBoxX = xUnit;
     const totalLabelW = 56;
     const totalValueW = 56;
     const totalRowH = 20;
-
-    function drawTotalRow(label, value, yy, shaded = false) {
-      drawCell(totalBoxX - 66, yy, 66, totalRowH, label, {
-        bold: true,
-        size: 9,
-        align: "right"
-      });
-      drawCell(totalBoxX, yy, totalLabelW, totalRowH, shaded ? "" : "", {
-        size: 9,
-        fill: shaded ? "#d9d9d9" : null
-      });
-      drawCell(totalBoxX + totalLabelW, yy, totalValueW, totalRowH, value, {
-        size: 9,
-        fill: shaded ? "#d9d9d9" : null
-      });
-    }
 
     drawText(totalBoxX - 66, y + 4, "Sub - Total:", {
       size: 10,
@@ -650,7 +590,7 @@ function gerarPdfOrcamento(payload, calc) {
       align: "right"
     });
     drawCell(totalBoxX, y, totalLabelW, totalRowH, "", { fill: "#d9d9d9" });
-    drawCell(totalBoxX + totalLabelW, y, totalValueW, totalRowH, euro(subtotal), {
+    drawCell(totalBoxX + totalLabelW, y, totalValueW, totalRowH, formatEuro(calc.total), {
       fill: "#d9d9d9",
       size: 9
     });
@@ -664,58 +604,15 @@ function gerarPdfOrcamento(payload, calc) {
       align: "right"
     });
     drawCell(totalBoxX, y, totalLabelW, totalRowH, "", { fill: "#d9d9d9" });
-    drawCell(totalBoxX + totalLabelW, y, totalValueW, totalRowH, "Incluido", {
+    drawCell(totalBoxX + totalLabelW, y, totalValueW, totalRowH, "Incluído", {
       fill: "#d9d9d9",
       size: 9
     });
 
-    y += totalRowH;
-
-    drawText(totalBoxX - 66, y + 4, "Total:", {
-      size: 10,
-      bold: true,
-      width: 60,
-      align: "right"
-    });
-    drawCell(totalBoxX, y, totalLabelW, totalRowH, "", { fill: "#d9d9d9" });
-    drawCell(totalBoxX + totalLabelW, y, totalValueW, totalRowH, euro(total), {
-      fill: "#d9d9d9",
-      size: 9
-    });
-
-    y += totalRowH;
-
-    drawText(totalBoxX - 66, y + 4, "Entrega:", {
-      size: 10,
-      bold: true,
-      width: 60,
-      align: "right"
-    });
-    drawCell(totalBoxX, y, totalLabelW, totalRowH, "", { fill: "#d9d9d9" });
-    drawCell(totalBoxX + totalLabelW, y, totalValueW, totalRowH, "", {
-      fill: "#d9d9d9",
-      size: 9
-    });
-
-    y += totalRowH;
-
-    drawText(totalBoxX - 66, y + 4, "Total:", {
-      size: 10,
-      bold: true,
-      width: 60,
-      align: "right"
-    });
-    drawCell(totalBoxX, y, totalLabelW, totalRowH, "", { fill: "#d9d9d9" });
-    drawCell(totalBoxX + totalLabelW, y, totalValueW, totalRowH, "", {
-      fill: "#d9d9d9",
-      size: 9
-    });
-
-    y += 55;
+    y += 45;
 
     drawText(70, y, "Condições de Fornecimento:", {
-      size: 12,
-      bold: false
+      size: 12
     });
 
     y += 28;
@@ -757,7 +654,6 @@ function gerarPdfOrcamento(payload, calc) {
       align: "center"
     });
 
-    // Página 2
     doc.addPage();
 
     drawText(0, 30, "GUIA LAR – Loja de Decoração", {
@@ -771,7 +667,7 @@ function gerarPdfOrcamento(payload, calc) {
       110,
       "Em caso de adjudicação, deverão V. Exas., devolver-nos este documento devidamente assinado.",
       { size: 11, width: 430 }
-    );
+    });
 
     drawText(0, 150, "O Cliente", {
       size: 12,
@@ -783,7 +679,6 @@ function gerarPdfOrcamento(payload, calc) {
 
     drawText(70, 205, "Nota importante:", {
       size: 10,
-      bold: false,
       width: 430
     });
 
