@@ -142,13 +142,7 @@ const CONFIG = {
       precoMl: 29,
       imagem: `${API_URL}/imagens/calhas/calha-premium-preta.jpg`
     }
-  ],
-
-  servicos: {
-    verificacaoMedidas: 25,
-    instalacaoCortinado: 65,
-    instalacaoEstore: 45
-  }
+  ]
 };
 
 function encontrarTipo(id) {
@@ -234,11 +228,7 @@ function validarPayload(body) {
 function calcularQuantidadeGanchos(tamanhoCalhaM) {
   let quantidade = tamanhoCalhaM / 0.065;
   quantidade = Math.floor(quantidade);
-
-  if (quantidade % 2 !== 0) {
-    quantidade += 1;
-  }
-
+  if (quantidade % 2 !== 0) quantidade += 1;
   return quantidade;
 }
 
@@ -273,7 +263,6 @@ function calcularOrcamento(payload) {
     const tamanhoCalhaM = larguraM;
     const tamanhoCalhaCm = Number(payload.larguraCm);
 
-    // 1. CALHA
     let valorUnitarioCalha = (calha.precoMl * tamanhoCalhaM) + 6;
     if (tamanhoCalhaM > 4) {
       valorUnitarioCalha += 7;
@@ -288,7 +277,6 @@ function calcularOrcamento(payload) {
       total: valorUnitarioCalha
     });
 
-    // 2. GANCHOS
     const quantidadeGanchos = calcularQuantidadeGanchos(tamanhoCalhaM);
     const valorUnitarioGanchos = 0.10;
     const valorTotalGanchos = quantidadeGanchos * valorUnitarioGanchos;
@@ -301,7 +289,6 @@ function calcularOrcamento(payload) {
       total: valorTotalGanchos
     });
 
-    // 3. TECIDO
     const quantidadeTecido = (tamanhoCalhaM * 2.5) + 0.30;
     const valorUnitarioTecido = produto.precoM2;
     const valorTotalTecido = quantidadeTecido * valorUnitarioTecido;
@@ -314,7 +301,6 @@ function calcularOrcamento(payload) {
       total: valorTotalTecido
     });
 
-    // 4. FITA ONDA
     const quantidadeFitaOnda = quantidadeTecido;
     const valorUnitarioFitaOnda = 1.5;
     const valorTotalFitaOnda = quantidadeFitaOnda * valorUnitarioFitaOnda;
@@ -327,7 +313,6 @@ function calcularOrcamento(payload) {
       total: valorTotalFitaOnda
     });
 
-    // 5. CONFEÇÃO
     const valorUnitarioConfecao = calcularValorConfecao(quantidadeTecido);
 
     linhas.push({
@@ -338,7 +323,6 @@ function calcularOrcamento(payload) {
       total: valorUnitarioConfecao
     });
 
-    // 6. COLOCAÇÃO E MONTAGEM
     if (payload.instalacao === "sim") {
       const valorUnitarioColocacao = calcularValorColocacao(tamanhoCalhaM);
 
@@ -362,7 +346,8 @@ function calcularOrcamento(payload) {
       area,
       larguraM,
       alturaM,
-      linhas
+      linhas,
+      divisao: "Sala"
     };
   }
 
@@ -386,7 +371,8 @@ function calcularOrcamento(payload) {
     area,
     larguraM,
     alturaM,
-    linhas
+    linhas,
+    divisao: "Sala"
   };
 }
 
@@ -403,14 +389,19 @@ function gerarPdfOrcamento(payload, calc) {
     doc.on("error", reject);
 
     const cliente = payload.cliente;
-    const hoje = new Date().toLocaleDateString("pt-PT");
+    const hoje = new Date().toLocaleDateString("pt-PT", {
+      day: "2-digit",
+      month: "long",
+      year: "numeric"
+    });
 
     function drawCell(x, y, w, h, text, opts = {}) {
       const { size = 9, align = "center", bold = false, fill = null, padding = 4 } = opts;
 
       if (fill) {
+        doc.save();
         doc.rect(x, y, w, h).fill(fill);
-        doc.fillColor("#000000");
+        doc.restore();
       }
 
       doc.rect(x, y, w, h).stroke();
@@ -479,14 +470,20 @@ function gerarPdfOrcamento(payload, calc) {
 
     y += headerH;
 
+    const materialRowsHeight = calc.linhas.length * rowHeight;
+
+    drawCell(xDiv, y, 48, materialRowsHeight, calc.divisao || "Sala", { size: 9 });
+
     calc.linhas.forEach((row, index) => {
-      drawCell(xDiv, y, 48, rowHeight, index === 0 ? row.divisao : "");
-      drawCell(xQt, y, 34, rowHeight, formatQuantidade(row.qt));
-      drawCell(xDesc, y, 235, rowHeight, row.descricao);
-      drawCell(xUnit, y, 56, rowHeight, formatEuro(row.unitario));
-      drawCell(xTot, y, 56, rowHeight, formatEuro(row.total));
-      y += rowHeight;
+      const rowY = y + (index * rowHeight);
+
+      drawCell(xQt, rowY, 34, rowHeight, formatQuantidade(row.qt));
+      drawCell(xDesc, rowY, 235, rowHeight, row.descricao);
+      drawCell(xUnit, rowY, 56, rowHeight, formatEuro(row.unitario));
+      drawCell(xTot, rowY, 56, rowHeight, formatEuro(row.total));
     });
+
+    y += materialRowsHeight;
 
     drawText(xUnit - 66, y + 4, "Sub - Total:", {
       size: 10,
@@ -507,6 +504,100 @@ function gerarPdfOrcamento(payload, calc) {
     });
     drawCell(xUnit, y, 56, 20, "", { fill: "#d9d9d9" });
     drawCell(xTot, y, 56, 20, "Incluído", { fill: "#d9d9d9" });
+
+    y += 55;
+
+    drawText(70, y, "Condições de Fornecimento:", { size: 10 });
+    y += 18;
+
+    drawText(88, y, "• O preço orçamentado inclui IVA à taxa em vigor.", { size: 9, width: 360 });
+    y += 14;
+    drawText(88, y, "• Proposta válida pelo período de 7 dias.", { size: 9, width: 360 });
+    y += 14;
+    drawText(88, y, "• Condições de pagamento: 30% de adjudicação ou superior se o cliente assim pretender (IBAN: PT50 0036 0032 9910 0361 4048 8), restante após conclusão dos trabalhos.", { size: 9, width: 360 });
+    y += 28;
+    drawText(88, y, "• Local de entrega: Obra do cliente.", { size: 9, width: 360 });
+    y += 14;
+    drawText(88, y, "• Prazo de entrega: A definir.", { size: 9, width: 360 });
+
+    y += 26;
+    drawText(70, y, "Esperamos que o orçamento seja do seu agrado, agradecemos imenso a sua proposta de consulta.", {
+      size: 9,
+      width: 360
+    });
+
+    y += 24;
+    drawText(70, y, "Sem outro assunto de momento subscrevemo-nos com consideração.", {
+      size: 9,
+      width: 360
+    });
+
+    y += 34;
+    drawText(0, y, "A Gerência", {
+      size: 10,
+      align: "center",
+      width: 595 - 100
+    });
+
+    y += 22;
+    doc.font("Times-BoldItalic").fontSize(12).text("Andreia Guerreiro & Luís Pires", 0, y, {
+      width: 595 - 100,
+      align: "center"
+    });
+
+    doc.addPage();
+
+    drawText(0, 30, "GUIA LAR – Loja de Decoração", {
+      size: 13,
+      align: "center",
+      width: 595 - 100
+    });
+
+    drawText(
+      60,
+      95,
+      "Em caso de adjudicação, deverão V. Exas., devolver-nos este documento devidamente assinado.",
+      { size: 9, width: 310 }
+    );
+
+    drawText(0, 120, "O Cliente", {
+      size: 10,
+      align: "center",
+      width: 595 - 100
+    });
+
+    doc.moveTo(60, 145).lineTo(405, 145).stroke();
+
+    drawText(60, 160, "Nota importante:", { size: 8, width: 320 });
+
+    drawText(
+      85,
+      170,
+      "1. A Guialar considera da responsabilidade do proprietário ou de quem legitimamente o represente, a obtenção de todas as licenças e demais autorizações, necessárias à execução da obra, não podendo, por isso ser-lhe imputada qualquer responsabilidade pela sua não existência.",
+      { size: 8, width: 290 }
+    );
+
+    drawText(
+      85,
+      225,
+      "2. Os materiais fornecidos serão propriedade da Guialar, até ao seu pagamento integral, podendo ser retirados da casa do cliente em caso de não pagamento.",
+      { size: 8, width: 290 }
+    );
+
+    drawText(
+      85,
+      278,
+      "3. Os preços podem variar em função das medidas definidas e da supervisão das características técnicas da obra, não incluindo quaisquer encargos de eventuais trabalhos de desmontagem e ou preparação de vãos.",
+      { size: 8, width: 290 }
+    );
+
+    drawText(0, 350, "O Cliente", {
+      size: 10,
+      align: "center",
+      width: 595 - 100
+    });
+
+    doc.moveTo(60, 375).lineTo(405, 375).stroke();
 
     doc.end();
   });
