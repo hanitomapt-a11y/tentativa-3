@@ -242,6 +242,14 @@ function calcularQuantidadeGanchos(tamanhoCalhaM) {
   return quantidade;
 }
 
+function calcularValorConfecao(quantidadeTecido) {
+  if (quantidadeTecido <= 5) return 60;
+  if (quantidadeTecido <= 7) return 70;
+  if (quantidadeTecido <= 8) return 80;
+  if (quantidadeTecido <= 9) return 90;
+  return quantidadeTecido * 10;
+}
+
 function calcularOrcamento(payload) {
   const tipo = encontrarTipo(payload.tipo);
   const produto = encontrarProduto(payload.tipo, payload.produtoId);
@@ -311,6 +319,17 @@ function calcularOrcamento(payload) {
       descricao: "Fita Onda",
       unitario: valorUnitarioFitaOnda,
       total: valorTotalFitaOnda
+    });
+
+    // 5. CONFEÇÃO
+    const valorUnitarioConfecao = calcularValorConfecao(quantidadeTecido);
+
+    linhas.push({
+      divisao: "",
+      qt: 1,
+      descricao: "Confeção",
+      unitario: valorUnitarioConfecao,
+      total: valorUnitarioConfecao
     });
 
     total = linhas.reduce((acc, linha) => acc + linha.total, 0);
