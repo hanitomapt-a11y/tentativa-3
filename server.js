@@ -300,6 +300,19 @@ function calcularOrcamento(payload) {
       total: valorTotalTecido
     });
 
+    // 4. FITA ONDA
+    const quantidadeFitaOnda = quantidadeTecido;
+    const valorUnitarioFitaOnda = 1.5;
+    const valorTotalFitaOnda = quantidadeFitaOnda * valorUnitarioFitaOnda;
+
+    linhas.push({
+      divisao: "",
+      qt: quantidadeFitaOnda,
+      descricao: "Fita Onda",
+      unitario: valorUnitarioFitaOnda,
+      total: valorTotalFitaOnda
+    });
+
     total = linhas.reduce((acc, linha) => acc + linha.total, 0);
 
     return {
