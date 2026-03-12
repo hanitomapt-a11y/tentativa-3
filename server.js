@@ -232,7 +232,6 @@ function validarPayload(body) {
 }
 
 function calcularQuantidadeGanchos(tamanhoCalhaM) {
-  // Pelos teus exemplos, a conta correta é / 0,065
   let quantidade = tamanhoCalhaM / 0.065;
   quantidade = Math.floor(quantidade);
 
@@ -288,16 +287,17 @@ function calcularOrcamento(payload) {
       total: valorTotalGanchos
     });
 
-    // 3. TECIDO (mantido temporariamente simples)
-    const metrosTecido = area * tipoCortina.fatorConsumo;
-    const valorTecido = metrosTecido * produto.precoM2;
+    // 3. TECIDO
+    const quantidadeTecido = (tamanhoCalhaM * 2.5) + 0.30;
+    const valorUnitarioTecido = produto.precoM2;
+    const valorTotalTecido = quantidadeTecido * valorUnitarioTecido;
 
     linhas.push({
       divisao: "",
-      qt: metrosTecido,
+      qt: quantidadeTecido,
       descricao: produto.nome,
-      unitario: produto.precoM2,
-      total: valorTecido
+      unitario: valorUnitarioTecido,
+      total: valorTotalTecido
     });
 
     total = linhas.reduce((acc, linha) => acc + linha.total, 0);
