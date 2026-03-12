@@ -395,6 +395,12 @@ function gerarPdfOrcamento(payload, calc) {
       year: "numeric"
     });
 
+    const pageWidth = doc.page.width;
+    const contentWidth = pageWidth - 100;
+    const centerX = 50;
+    const secondPageBlockWidth = 420;
+    const secondPageLeft = (pageWidth - secondPageBlockWidth) / 2;
+
     function drawCell(x, y, w, h, text, opts = {}) {
       const { size = 9, align = "center", bold = false, fill = null, padding = 4 } = opts;
 
@@ -423,10 +429,11 @@ function gerarPdfOrcamento(payload, calc) {
         .text(text, x, y, { width, align });
     }
 
-    drawText(0, 30, "GUIA LAR – Loja de Decoração", {
+    // Página 1
+    drawText(centerX, 30, "GUIA LAR – Loja de Decoração", {
       size: 13,
       align: "center",
-      width: 595 - 100
+      width: contentWidth
     });
 
     drawText(70, 62, "Exmo. Sr.(a)", { size: 10 });
@@ -533,71 +540,75 @@ function gerarPdfOrcamento(payload, calc) {
     });
 
     y += 34;
-    drawText(0, y, "A Gerência", {
+    drawText(centerX, y, "A Gerência", {
       size: 10,
       align: "center",
-      width: 595 - 100
+      width: contentWidth
     });
 
     y += 22;
-    doc.font("Times-BoldItalic").fontSize(12).text("Andreia Guerreiro & Luís Pires", 0, y, {
-      width: 595 - 100,
+    doc.font("Times-BoldItalic").fontSize(12).text("Andreia Guerreiro & Luís Pires", centerX, y, {
+      width: contentWidth,
       align: "center"
     });
 
+    // Página 2
     doc.addPage();
 
-    drawText(0, 30, "GUIA LAR – Loja de Decoração", {
+    drawText(centerX, 35, "GUIA LAR – Loja de Decoração", {
       size: 13,
       align: "center",
-      width: 595 - 100
+      width: contentWidth
     });
 
-    drawText(
-      60,
-      95,
-      "Em caso de adjudicação, deverão V. Exas., devolver-nos este documento devidamente assinado.",
-      { size: 9, width: 310 }
-    );
+    drawText(secondPageLeft, 95, "Em caso de adjudicação, deverão V. Exas., devolver-nos este documento devidamente assinado.", {
+      size: 9,
+      width: secondPageBlockWidth * 0.74,
+      align: "left"
+    });
 
-    drawText(0, 120, "O Cliente", {
+    drawText(centerX, 122, "O Cliente", {
       size: 10,
       align: "center",
-      width: 595 - 100
+      width: contentWidth
     });
 
-    doc.moveTo(60, 145).lineTo(405, 145).stroke();
+    doc.moveTo(secondPageLeft, 146).lineTo(secondPageLeft + secondPageBlockWidth, 146).stroke();
 
-    drawText(60, 160, "Nota importante:", { size: 8, width: 320 });
+    drawText(secondPageLeft, 165, "Nota importante:", {
+      size: 8,
+      width: secondPageBlockWidth,
+      align: "left"
+    });
 
     drawText(
-      85,
-      170,
+      secondPageLeft + 18,
+      178,
       "1. A Guialar considera da responsabilidade do proprietário ou de quem legitimamente o represente, a obtenção de todas as licenças e demais autorizações, necessárias à execução da obra, não podendo, por isso ser-lhe imputada qualquer responsabilidade pela sua não existência.",
-      { size: 8, width: 290 }
+      { size: 8, width: secondPageBlockWidth - 30, align: "left" }
     );
 
     drawText(
-      85,
-      225,
+      secondPageLeft + 18,
+      238,
       "2. Os materiais fornecidos serão propriedade da Guialar, até ao seu pagamento integral, podendo ser retirados da casa do cliente em caso de não pagamento.",
-      { size: 8, width: 290 }
+      { size: 8, width: secondPageBlockWidth - 30, align: "left" }
     );
 
     drawText(
-      85,
-      278,
+      secondPageLeft + 18,
+      290,
       "3. Os preços podem variar em função das medidas definidas e da supervisão das características técnicas da obra, não incluindo quaisquer encargos de eventuais trabalhos de desmontagem e ou preparação de vãos.",
-      { size: 8, width: 290 }
+      { size: 8, width: secondPageBlockWidth - 30, align: "left" }
     );
 
-    drawText(0, 350, "O Cliente", {
+    drawText(centerX, 390, "O Cliente", {
       size: 10,
       align: "center",
-      width: 595 - 100
+      width: contentWidth
     });
 
-    doc.moveTo(60, 375).lineTo(405, 375).stroke();
+    doc.moveTo(secondPageLeft, 414).lineTo(secondPageLeft + secondPageBlockWidth, 414).stroke();
 
     doc.end();
   });
