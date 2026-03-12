@@ -250,6 +250,12 @@ function calcularValorConfecao(quantidadeTecido) {
   return quantidadeTecido * 10;
 }
 
+function calcularValorColocacao(tamanhoCalhaM) {
+  if (tamanhoCalhaM <= 1.5) return 15;
+  if (tamanhoCalhaM <= 4.0) return 20;
+  return 25;
+}
+
 function calcularOrcamento(payload) {
   const tipo = encontrarTipo(payload.tipo);
   const produto = encontrarProduto(payload.tipo, payload.produtoId);
@@ -331,6 +337,19 @@ function calcularOrcamento(payload) {
       unitario: valorUnitarioConfecao,
       total: valorUnitarioConfecao
     });
+
+    // 6. COLOCAÇÃO E MONTAGEM
+    if (payload.instalacao === "sim") {
+      const valorUnitarioColocacao = calcularValorColocacao(tamanhoCalhaM);
+
+      linhas.push({
+        divisao: "",
+        qt: 1,
+        descricao: "Colocação e Montagem",
+        unitario: valorUnitarioColocacao,
+        total: valorUnitarioColocacao
+      });
+    }
 
     total = linhas.reduce((acc, linha) => acc + linha.total, 0);
 
