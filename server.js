@@ -4,7 +4,6 @@ const express = require("express");
 const cors = require("cors");
 const nodemailer = require("nodemailer");
 const PDFDocument = require("pdfkit");
-const mysql = require("mysql2/promise");
 
 const app = express();
 
@@ -21,17 +20,6 @@ app.use(cors({
 app.use(express.json({ limit: "10mb" }));
 
 const API_URL = "https://api.guialar.net";
-
-const pool = mysql.createPool({
-  host: process.env.DB_HOST,
-  port: Number(process.env.DB_PORT || 3306),
-  user: process.env.DB_USER,
-  password: process.env.DB_PASS,
-  database: process.env.DB_NAME,
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0
-});
 
 const CONFIG = {
   tipos: [
@@ -84,21 +72,93 @@ const CONFIG = {
       fatorConsumo: 2.1,
       imagem: `${API_URL}/imagens/tipos-cortina/pregas.jpg`
     }
+  ],
+
+  produtos: {
+    cortinado: [
+      {
+        id: "tec-cort-001",
+        nome: "Linho Natural",
+        descricao: "Tecido leve com acabamento natural.",
+        precoM2: 38,
+        imagem: `${API_URL}/imagens/produtos/cortinado-linho-natural.jpg`
+      },
+      {
+        id: "tec-cort-002",
+        nome: "Veludo Areia",
+        descricao: "Tecido mais encorpado e sofisticado.",
+        precoM2: 52,
+        imagem: `${API_URL}/imagens/produtos/cortinado-veludo-areia.jpg`
+      },
+      {
+        id: "tec-cort-003",
+        nome: "Blackout Soft",
+        descricao: "Maior bloqueio de luz.",
+        precoM2: 46,
+        imagem: `${API_URL}/imagens/produtos/cortinado-blackout-soft.jpg`
+      }
+    ],
+
+    estore: [
+      {
+        id: "tec-est-001",
+        nome: "Screen Branco",
+        descricao: "Boa entrada de luz com privacidade.",
+        precoM2: 34,
+        imagem: `${API_URL}/imagens/produtos/estore-screen-branco.jpg`
+      }
+    ],
+
+    estore_japones: [
+      {
+        id: "tec-jap-001",
+        nome: "Painel Pérola",
+        descricao: "Visual limpo para divisões modernas.",
+        precoM2: 41,
+        imagem: `${API_URL}/imagens/produtos/japones-perola.jpg`
+      }
+    ]
+  },
+
+  calhas: [
+    {
+      id: "calha-001",
+      nome: "Calha Slim Branca",
+      descricao: "Perfil discreto e elegante.",
+      precoMl: 18,
+      imagem: `${API_URL}/imagens/calhas/calha-slim-branca.jpg`
+    },
+    {
+      id: "calha-002",
+      nome: "Calha Alumínio Escovado",
+      descricao: "Acabamento moderno.",
+      precoMl: 24,
+      imagem: `${API_URL}/imagens/calhas/calha-aluminio-escovado.jpg`
+    },
+    {
+      id: "calha-003",
+      nome: "Calha Premium Preta",
+      descricao: "Design mais sofisticado.",
+      precoMl: 29,
+      imagem: `${API_URL}/imagens/calhas/calha-premium-preta.jpg`
+    }
   ]
 };
 
-const TIPO_TO_COLLECTION_SLUG = {
-  cortinado: "cortinados",
-  estore: "estores",
-  estore_japones: "estore-japones"
-};
-
 function encontrarTipo(id) {
-  return CONFIG.tipos.find(item => item.id === id) || null;
+  return CONFIG.tipos.find((item) => item.id === id) || null;
+}
+
+function encontrarProduto(tipo, produtoId) {
+  return (CONFIG.produtos[tipo] || []).find((item) => item.id === produtoId) || null;
 }
 
 function encontrarTipoCortina(id) {
-  return CONFIG.tiposCortina.find(item => item.id === id) || null;
+  return CONFIG.tiposCortina.find((item) => item.id === id) || null;
+}
+
+function encontrarCalha(id) {
+  return CONFIG.calhas.find((item) => item.id === id) || null;
 }
 
 function existeValor(v) {
@@ -116,107 +176,7 @@ function formatQuantidade(valor) {
     : valor.toFixed(2).replace(".", ",");
 }
 
-function mapDbProduct(row, { isCalha = false } = {}) {
-  return {
-    id: String(row.id),
-    nome: row.name,
-    descricao: row.short_description || row.description || "",
-    imagem: row.main_image || "",
-    precoM2: isCalha ? undefined : Number(row.price || 0),
-    precoMl: isCalha ? Number(row.price || 0) : undefined
-  };
-}
-
-async function obterProdutosPorCollectionSlug(slug) {
-  const [rows] = await pool.query(
-    `
-    SELECT
-      p.id,
-      p.name,
-      p.slug,
-      p.short_description,
-      p.description,
-      p.price,
-      p.stock_qty,
-      p.main_image,
-      p.is_active,
-      c.slug AS collection_slug
-    FROM products p
-    INNER JOIN collections c ON c.id = p.collection_id
-    WHERE c.slug = ?
-      AND c.is_active = 1
-      AND p.is_active = 1
-    ORDER BY p.id ASC
-    `,
-    [slug]
-  );
-
-  const isCalha = slug === "calhas";
-  return rows.map(row => mapDbProduct(row, { isCalha }));
-}
-
-async function encontrarProdutoPorTipo(produtoId, tipo) {
-  const slug = TIPO_TO_COLLECTION_SLUG[tipo];
-  if (!slug) return null;
-
-  const [rows] = await pool.query(
-    `
-    SELECT
-      p.id,
-      p.name,
-      p.slug,
-      p.short_description,
-      p.description,
-      p.price,
-      p.stock_qty,
-      p.main_image,
-      p.is_active,
-      c.slug AS collection_slug
-    FROM products p
-    INNER JOIN collections c ON c.id = p.collection_id
-    WHERE p.id = ?
-      AND c.slug = ?
-      AND c.is_active = 1
-      AND p.is_active = 1
-    LIMIT 1
-    `,
-    [produtoId, slug]
-  );
-
-  if (!rows.length) return null;
-  return mapDbProduct(rows[0], { isCalha: false });
-}
-
-async function encontrarCalhaPorId(calhaId) {
-  const [rows] = await pool.query(
-    `
-    SELECT
-      p.id,
-      p.name,
-      p.slug,
-      p.short_description,
-      p.description,
-      p.price,
-      p.stock_qty,
-      p.main_image,
-      p.is_active,
-      c.slug AS collection_slug
-    FROM products p
-    INNER JOIN collections c ON c.id = p.collection_id
-    WHERE p.id = ?
-      AND c.slug = 'calhas'
-      AND c.is_active = 1
-      AND p.is_active = 1
-    LIMIT 1
-    `,
-    [calhaId]
-  );
-
-  if (!rows.length) return null;
-  return mapDbProduct(rows[0], { isCalha: true });
-}
-
-async function validarPayload(body) {
+function validarPayload(body) {
   const {
     tipo,
     produtoId,
@@ -249,9 +209,7 @@ async function validarPayload(body) {
   if (!emailValido) return "Email inválido.";
 
   if (!encontrarTipo(tipo)) return "Tipo inválido.";
-
-  const produto = await encontrarProdutoPorTipo(produtoId, tipo);
-  if (!produto) return "Produto inválido.";
+  if (!encontrarProduto(tipo, produtoId)) return "Produto inválido.";
 
   if (Number(larguraCm) <= 0) return "Largura inválida.";
   if (Number(alturaCm) <= 0) return "Altura inválida.";
@@ -261,9 +219,7 @@ async function validarPayload(body) {
     if (!existeValor(calhaId)) return "Falta a calha.";
     if (!existeValor(fixacaoCalha)) return "Falta a fixação da calha.";
     if (!encontrarTipoCortina(tipoCortinaId)) return "Tipo de cortina inválido.";
-
-    const calha = await encontrarCalhaPorId(calhaId);
-    if (!calha) return "Calha inválida.";
+    if (!encontrarCalha(calhaId)) return "Calha inválida.";
   }
 
   return null;
@@ -272,7 +228,11 @@ async function validarPayload(body) {
 function calcularQuantidadeGanchos(tamanhoCalhaM) {
   let quantidade = tamanhoCalhaM / 0.065;
   quantidade = Math.floor(quantidade);
-  if (quantidade % 2 !== 0) quantidade += 1;
+
+  if (quantidade % 2 !== 0) {
+    quantidade += 1;
+  }
+
   return quantidade;
 }
 
@@ -290,11 +250,11 @@ function calcularValorColocacao(tamanhoCalhaM) {
   return 25;
 }
 
-async function calcularOrcamento(payload) {
+function calcularOrcamento(payload) {
   const tipo = encontrarTipo(payload.tipo);
-  const produto = await encontrarProdutoPorTipo(payload.produtoId, payload.tipo);
+  const produto = encontrarProduto(payload.tipo, payload.produtoId);
   const tipoCortina = payload.tipoCortinaId ? encontrarTipoCortina(payload.tipoCortinaId) : null;
-  const calha = payload.calhaId ? await encontrarCalhaPorId(payload.calhaId) : null;
+  const calha = payload.calhaId ? encontrarCalha(payload.calhaId) : null;
 
   const larguraM = Number(payload.larguraCm) / 100;
   const alturaM = Number(payload.alturaCm) / 100;
@@ -307,7 +267,7 @@ async function calcularOrcamento(payload) {
     const tamanhoCalhaM = larguraM;
     const tamanhoCalhaCm = Number(payload.larguraCm);
 
-    let valorUnitarioCalha = (Number(calha.precoMl) * tamanhoCalhaM) + 6;
+    let valorUnitarioCalha = (calha.precoMl * tamanhoCalhaM) + 6;
     if (tamanhoCalhaM > 4) {
       valorUnitarioCalha += 7;
     }
@@ -334,7 +294,7 @@ async function calcularOrcamento(payload) {
     });
 
     const quantidadeTecido = (tamanhoCalhaM * 2.5) + 0.30;
-    const valorUnitarioTecido = Number(produto.precoM2 || 0);
+    const valorUnitarioTecido = produto.precoM2;
     const valorTotalTecido = quantidadeTecido * valorUnitarioTecido;
 
     linhas.push({
@@ -379,7 +339,7 @@ async function calcularOrcamento(payload) {
       });
     }
 
-    total = linhas.reduce((acc, linha) => acc + linha.total, 0);
+    total = linhas.reduce((acc, linha) => acc + Number(linha.total || 0), 0);
 
     return {
       tipo,
@@ -395,14 +355,14 @@ async function calcularOrcamento(payload) {
     };
   }
 
-  const subtotalProduto = area * Number(produto.precoM2 || 0);
+  const subtotalProduto = area * produto.precoM2;
   total += subtotalProduto;
 
   linhas.push({
     divisao: "Sala",
     qt: area,
     descricao: `${tipo.nome} "${produto.nome}"`,
-    unitario: Number(produto.precoM2 || 0),
+    unitario: produto.precoM2,
     total: subtotalProduto
   });
 
@@ -428,7 +388,7 @@ function gerarPdfOrcamento(payload, calc) {
     });
 
     const chunks = [];
-    doc.on("data", chunk => chunks.push(chunk));
+    doc.on("data", (chunk) => chunks.push(chunk));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
 
@@ -446,7 +406,13 @@ function gerarPdfOrcamento(payload, calc) {
     const secondPageLeft = (pageWidth - secondPageBlockWidth) / 2;
 
     function drawCell(x, y, w, h, text, opts = {}) {
-      const { size = 9, align = "center", bold = false, fill = null, padding = 4 } = opts;
+      const {
+        size = 9,
+        align = "center",
+        bold = false,
+        fill = null,
+        padding = 4
+      } = opts;
 
       if (fill) {
         doc.save();
@@ -456,7 +422,8 @@ function gerarPdfOrcamento(payload, calc) {
 
       doc.rect(x, y, w, h).stroke();
 
-      doc.font(bold ? "Helvetica-Bold" : "Helvetica")
+      doc
+        .font(bold ? "Helvetica-Bold" : "Helvetica")
         .fontSize(size)
         .text(text || "", x + padding, y + padding, {
           width: w - padding * 2,
@@ -466,9 +433,15 @@ function gerarPdfOrcamento(payload, calc) {
     }
 
     function drawText(x, y, text, opts = {}) {
-      const { size = 10, align = "left", width = 500, bold = false } = opts;
+      const {
+        size = 10,
+        align = "left",
+        width = 500,
+        bold = false
+      } = opts;
 
-      doc.font(bold ? "Helvetica-Bold" : "Helvetica")
+      doc
+        .font(bold ? "Helvetica-Bold" : "Helvetica")
         .fontSize(size)
         .text(text, x, y, { width, align });
     }
@@ -493,7 +466,12 @@ function gerarPdfOrcamento(payload, calc) {
     doc.moveTo(225, 126).lineTo(300, 126).stroke();
 
     drawText(70, 144, "Exmo. Sr.(a)", { size: 10 });
-    drawText(350, 144, hoje, { size: 10, bold: true, width: 150, align: "right" });
+    drawText(350, 144, hoje, {
+      size: 10,
+      bold: true,
+      width: 150,
+      align: "right"
+    });
 
     drawText(
       70,
@@ -564,23 +542,32 @@ function gerarPdfOrcamento(payload, calc) {
     y += 14;
     drawText(88, y, "• Proposta válida pelo período de 7 dias.", { size: 9, width: 360 });
     y += 14;
-    drawText(88, y, "• Condições de pagamento: 30% de adjudicação ou superior se o cliente assim pretender (IBAN: PT50 0036 0032 9910 0361 4048 8), restante após conclusão dos trabalhos.", { size: 9, width: 360 });
+    drawText(
+      88,
+      y,
+      "• Condições de pagamento: 30% de adjudicação ou superior se o cliente assim pretender (IBAN: PT50 0036 0032 9910 0361 4048 8), restante após conclusão dos trabalhos.",
+      { size: 9, width: 360 }
+    );
     y += 28;
     drawText(88, y, "• Local de entrega: Obra do cliente.", { size: 9, width: 360 });
     y += 14;
     drawText(88, y, "• Prazo de entrega: A definir.", { size: 9, width: 360 });
 
     y += 26;
-    drawText(70, y, "Esperamos que o orçamento seja do seu agrado, agradecemos imenso a sua proposta de consulta.", {
-      size: 9,
-      width: 360
-    });
+    drawText(
+      70,
+      y,
+      "Esperamos que o orçamento seja do seu agrado, agradecemos imenso a sua proposta de consulta.",
+      { size: 9, width: 360 }
+    );
 
     y += 24;
-    drawText(70, y, "Sem outro assunto de momento subscrevemo-nos com consideração.", {
-      size: 9,
-      width: 360
-    });
+    drawText(
+      70,
+      y,
+      "Sem outro assunto de momento subscrevemo-nos com consideração.",
+      { size: 9, width: 360 }
+    );
 
     y += 34;
     drawText(centerX, y, "A Gerência", {
@@ -603,11 +590,16 @@ function gerarPdfOrcamento(payload, calc) {
       width: contentWidth
     });
 
-    drawText(secondPageLeft, 95, "Em caso de adjudicação, deverão V. Exas., devolver-nos este documento devidamente assinado.", {
-      size: 9,
-      width: secondPageBlockWidth * 0.74,
-      align: "left"
-    });
+    drawText(
+      secondPageLeft,
+      95,
+      "Em caso de adjudicação, deverão V. Exas., devolver-nos este documento devidamente assinado.",
+      {
+        size: 9,
+        width: secondPageBlockWidth * 0.74,
+        align: "left"
+      }
+    );
 
     drawText(centerX, 122, "O Cliente", {
       size: 10,
@@ -656,70 +648,28 @@ function gerarPdfOrcamento(payload, calc) {
   });
 }
 
-app.get("/", async (req, res) => {
-  try {
-    await pool.query("SELECT 1");
-    res.json({
-      ok: true,
-      mensagem: "API Guia Lar ativa."
-    });
-  } catch (error) {
-    console.error("Erro na verificação da base de dados:", error);
-    res.status(500).json({
-      ok: false,
-      mensagem: "API ativa, mas sem ligação à base de dados.",
-      erro: error.message
-    });
-  }
-});
-
-app.get("/api/db-test", async (req, res) => {
-  try {
-    const [rows] = await pool.query("SELECT 1 AS ok");
-    return res.json({
-      ok: true,
-      rows
-    });
-  } catch (error) {
-    console.error("Erro DB TEST:", error);
-    return res.status(500).json({
-      ok: false,
-      erro: error.message
-    });
-  }
+app.get("/", (req, res) => {
+  res.json({
+    ok: true,
+    mensagem: "API Guia Lar ativa."
+  });
 });
 
 app.get("/api/orcamento/config", (req, res) => {
   res.json(CONFIG);
 });
 
-app.get("/api/collections/:slug/products", async (req, res) => {
-  try {
-    const { slug } = req.params;
-    console.log("A pedir coleção:", slug);
-
-    const produtos = await obterProdutosPorCollectionSlug(slug);
-
-    return res.json(produtos);
-  } catch (error) {
-    console.error("Erro ao obter produtos da coleção:", error);
-    return res.status(500).json({
-      mensagem: "Erro ao obter produtos da coleção.",
-      erro: error.message
-    });
-  }
-});
-
 app.post("/api/orcamento/enviar", async (req, res) => {
   try {
-    const erroValidacao = await validarPayload(req.body);
+    const erroValidacao = validarPayload(req.body);
+
     if (erroValidacao) {
       return res.status(400).json({
         mensagem: erroValidacao
       });
     }
 
-    const calc = await calcularOrcamento(req.body);
+    const calc = calcularOrcamento(req.body);
     const cliente = req.body.cliente;
     const pdfBuffer = await gerarPdfOrcamento(req.body, calc);
 
@@ -768,6 +718,7 @@ app.post("/api/orcamento/enviar", async (req, res) => {
     });
   } catch (error) {
     console.error("Erro ao enviar orçamento:", error);
+
     return res.status(500).json({
       mensagem: error.message || "Erro ao enviar o orçamento."
     });
