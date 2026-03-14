@@ -4,6 +4,7 @@ const express = require("express");
 const cors = require("cors");
 const nodemailer = require("nodemailer");
 const PDFDocument = require("pdfkit");
+const db = require("./db");
 
 const app = express();
 
@@ -26,19 +27,19 @@ const CONFIG = {
     {
       id: "cortinado",
       nome: "Cortinado",
-      descricao: "Escolha tecido, tipo de cortina, calha e serviços.",
+      descricao: "Escolha o tecido, tipo de cortina, calha e serviços.",
       imagem: `${API_URL}/imagens/tipos/cortinado.jpg`
     },
     {
       id: "estore",
       nome: "Estore",
-      descricao: "Escolha o tecido e os serviços pretendidos.",
+      descricao: "Escolha o produto e os serviços pretendidos.",
       imagem: `${API_URL}/imagens/tipos/estore.jpg`
     },
     {
       id: "estore_japones",
       nome: "Estore Japonês",
-      descricao: "Escolha o tecido e os serviços pretendidos.",
+      descricao: "Escolha o produto e os serviços pretendidos.",
       imagem: `${API_URL}/imagens/tipos/estore-japones.jpg`
     }
   ],
@@ -72,93 +73,22 @@ const CONFIG = {
       fatorConsumo: 2.1,
       imagem: `${API_URL}/imagens/tipos-cortina/pregas.jpg`
     }
-  ],
-
-  produtos: {
-    cortinado: [
-      {
-        id: "tec-cort-001",
-        nome: "Linho Natural",
-        descricao: "Tecido leve com acabamento natural.",
-        precoM2: 38,
-        imagem: `${API_URL}/imagens/produtos/cortinado-linho-natural.jpg`
-      },
-      {
-        id: "tec-cort-002",
-        nome: "Veludo Areia",
-        descricao: "Tecido mais encorpado e sofisticado.",
-        precoM2: 52,
-        imagem: `${API_URL}/imagens/produtos/cortinado-veludo-areia.jpg`
-      },
-      {
-        id: "tec-cort-003",
-        nome: "Blackout Soft",
-        descricao: "Maior bloqueio de luz.",
-        precoM2: 46,
-        imagem: `${API_URL}/imagens/produtos/cortinado-blackout-soft.jpg`
-      }
-    ],
-
-    estore: [
-      {
-        id: "tec-est-001",
-        nome: "Screen Branco",
-        descricao: "Boa entrada de luz com privacidade.",
-        precoM2: 34,
-        imagem: `${API_URL}/imagens/produtos/estore-screen-branco.jpg`
-      }
-    ],
-
-    estore_japones: [
-      {
-        id: "tec-jap-001",
-        nome: "Painel Pérola",
-        descricao: "Visual limpo para divisões modernas.",
-        precoM2: 41,
-        imagem: `${API_URL}/imagens/produtos/japones-perola.jpg`
-      }
-    ]
-  },
-
-  calhas: [
-    {
-      id: "calha-001",
-      nome: "Calha Slim Branca",
-      descricao: "Perfil discreto e elegante.",
-      precoMl: 18,
-      imagem: `${API_URL}/imagens/calhas/calha-slim-branca.jpg`
-    },
-    {
-      id: "calha-002",
-      nome: "Calha Alumínio Escovado",
-      descricao: "Acabamento moderno.",
-      precoMl: 24,
-      imagem: `${API_URL}/imagens/calhas/calha-aluminio-escovado.jpg`
-    },
-    {
-      id: "calha-003",
-      nome: "Calha Premium Preta",
-      descricao: "Design mais sofisticado.",
-      precoMl: 29,
-      imagem: `${API_URL}/imagens/calhas/calha-premium-preta.jpg`
-    }
   ]
+};
+
+const COLLECTION_ALIASES = {
+  cortinado: ["cortinados", "cortinado", "cortinados-modernos"],
+  estore: ["estores", "estore"],
+  estore_japones: ["estore-japones", "estore_japones", "estores-japoneses"],
+  calhas: ["calhas", "calha"]
 };
 
 function encontrarTipo(id) {
   return CONFIG.tipos.find((item) => item.id === id) || null;
 }
 
-function encontrarProduto(tipo, produtoId) {
-  return (CONFIG.produtos[tipo] || []).find((item) => item.id === produtoId) || null;
-}
-
 function encontrarTipoCortina(id) {
   return CONFIG.tiposCortina.find((item) => item.id === id) || null;
-}
-
-function encontrarCalha(id) {
-  return CONFIG.calhas.find((item) => item.id === id) || null;
 }
 
 function existeValor(v) {
@@ -176,7 +106,140 @@ function formatQuantidade(valor) {
     : valor.toFixed(2).replace(".", ",");
 }
 
-function validarPayload(body) {
+function normalizarSlug(texto = "") {
+  return String(texto)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, "-");
+}
+
+function getCollectionAliases(slug) {
+  return COLLECTION_ALIASES[slug] || [slug];
+}
+
+async function getCollectionsByAlias(alias) {
+  const aliases = getCollectionAliases(alias);
+
+  const [rows] = await db.query(
+    `
+    SELECT id, name, slug, description, image_url, is_active, sort_order
+    FROM collections
+    WHERE is_active = 1
+      AND (
+        slug IN (?)
+        OR REPLACE(LOWER(slug), "_", "-") IN (?)
+        OR REPLACE(LOWER(name), " ", "-") IN (?)
+      )
+    ORDER BY sort_order ASC, id ASC
+    `,
+    [aliases, aliases, aliases]
+  );
+
+  return rows;
+}
+
+async function getProductsByCollectionAlias(alias) {
+  const collections = await getCollectionsByAlias(alias);
+
+  if (!collections.length) {
+    return [];
+  }
+
+  const collectionIds = collections.map((item) => item.id);
+
+  const [rows] = await db.query(
+    `
+    SELECT
+      p.id,
+      p.collection_id,
+      p.name,
+      p.slug,
+      p.short_description,
+      p.description,
+      p.price,
+      p.stock_qty,
+      p.main_image,
+      p.is_active,
+      p.sort_order,
+      c.name AS collection_name,
+      c.slug AS collection_slug
+    FROM products p
+    INNER JOIN collections c ON c.id = p.collection_id
+    WHERE p.is_active = 1
+      AND p.collection_id IN (?)
+    ORDER BY p.sort_order ASC, p.id ASC
+    `,
+    [collectionIds]
+  );
+
+  return rows.map((item) => ({
+    id: String(item.id),
+    nome: item.name,
+    descricao: item.short_description || item.description || "",
+    preco: Number(item.price || 0),
+    precoM2: Number(item.price || 0),
+    precoMl: Number(item.price || 0),
+    imagem: item.main_image || "",
+    collectionId: item.collection_id,
+    collectionSlug: item.collection_slug
+  }));
+}
+
+async function getProductById(id) {
+  const [rows] = await db.query(
+    `
+    SELECT
+      p.id,
+      p.collection_id,
+      p.name,
+      p.slug,
+      p.short_description,
+      p.description,
+      p.price,
+      p.stock_qty,
+      p.main_image,
+      p.is_active,
+      p.sort_order,
+      c.name AS collection_name,
+      c.slug AS collection_slug
+    FROM products p
+    INNER JOIN collections c ON c.id = p.collection_id
+    WHERE p.id = ?
+      AND p.is_active = 1
+    LIMIT 1
+    `,
+    [id]
+  );
+
+  if (!rows.length) return null;
+
+  const item = rows[0];
+
+  return {
+    id: String(item.id),
+    nome: item.name,
+    descricao: item.short_description || item.description || "",
+    preco: Number(item.price || 0),
+    precoM2: Number(item.price || 0),
+    precoMl: Number(item.price || 0),
+    imagem: item.main_image || "",
+    collectionId: item.collection_id,
+    collectionSlug: item.collection_slug
+  };
+}
+
+function produtoPertenceAoTipo(produto, tipo) {
+  if (!produto) return false;
+
+  const slug = normalizarSlug(produto.collectionSlug || "");
+  const aliases = getCollectionAliases(tipo).map(normalizarSlug);
+
+  return aliases.includes(slug);
+}
+
+async function validarPayload(body) {
   const {
     tipo,
     produtoId,
@@ -209,17 +272,23 @@ function validarPayload(body) {
   if (!emailValido) return "Email inválido.";
 
   if (!encontrarTipo(tipo)) return "Tipo inválido.";
-  if (!encontrarProduto(tipo, produtoId)) return "Produto inválido.";
 
   if (Number(larguraCm) <= 0) return "Largura inválida.";
   if (Number(alturaCm) <= 0) return "Altura inválida.";
+
+  const produto = await getProductById(produtoId);
+  if (!produto) return "Produto inválido.";
+  if (!produtoPertenceAoTipo(produto, tipo)) return "O produto escolhido não pertence ao tipo selecionado.";
 
   if (tipo === "cortinado") {
     if (!existeValor(tipoCortinaId)) return "Falta o tipo de cortina.";
     if (!existeValor(calhaId)) return "Falta a calha.";
     if (!existeValor(fixacaoCalha)) return "Falta a fixação da calha.";
     if (!encontrarTipoCortina(tipoCortinaId)) return "Tipo de cortina inválido.";
-    if (!encontrarCalha(calhaId)) return "Calha inválida.";
+
+    const calha = await getProductById(calhaId);
+    if (!calha) return "Calha inválida.";
+    if (!produtoPertenceAoTipo(calha, "calhas")) return "A calha escolhida não pertence à coleção de calhas.";
   }
 
   return null;
@@ -250,11 +319,11 @@ function calcularValorColocacao(tamanhoCalhaM) {
   return 25;
 }
 
-function calcularOrcamento(payload) {
+async function calcularOrcamento(payload) {
   const tipo = encontrarTipo(payload.tipo);
-  const produto = encontrarProduto(payload.tipo, payload.produtoId);
+  const produto = await getProductById(payload.produtoId);
   const tipoCortina = payload.tipoCortinaId ? encontrarTipoCortina(payload.tipoCortinaId) : null;
-  const calha = payload.calhaId ? encontrarCalha(payload.calhaId) : null;
+  const calha = payload.calhaId ? await getProductById(payload.calhaId) : null;
 
   const larguraM = Number(payload.larguraCm) / 100;
   const alturaM = Number(payload.alturaCm) / 100;
@@ -267,7 +336,7 @@ function calcularOrcamento(payload) {
     const tamanhoCalhaM = larguraM;
     const tamanhoCalhaCm = Number(payload.larguraCm);
 
-    let valorUnitarioCalha = (calha.precoMl * tamanhoCalhaM) + 6;
+    let valorUnitarioCalha = (Number(calha.precoMl) * tamanhoCalhaM) + 6;
     if (tamanhoCalhaM > 4) {
       valorUnitarioCalha += 7;
     }
@@ -294,7 +363,7 @@ function calcularOrcamento(payload) {
     });
 
     const quantidadeTecido = (tamanhoCalhaM * 2.5) + 0.30;
-    const valorUnitarioTecido = produto.precoM2;
+    const valorUnitarioTecido = Number(produto.precoM2);
     const valorTotalTecido = quantidadeTecido * valorUnitarioTecido;
 
     linhas.push({
@@ -355,14 +424,14 @@ function calcularOrcamento(payload) {
     };
   }
 
-  const subtotalProduto = area * produto.precoM2;
+  const subtotalProduto = area * Number(produto.precoM2);
   total += subtotalProduto;
 
   linhas.push({
     divisao: "Sala",
     qt: area,
     descricao: `${tipo.nome} "${produto.nome}"`,
-    unitario: produto.precoM2,
+    unitario: Number(produto.precoM2),
     total: subtotalProduto
   });
 
@@ -655,13 +724,40 @@ app.get("/", (req, res) => {
   });
 });
 
-app.get("/api/orcamento/config", (req, res) => {
-  res.json(CONFIG);
+app.get("/api/collections/:slug/products", async (req, res) => {
+  try {
+    const { slug } = req.params;
+    const produtos = await getProductsByCollectionAlias(slug);
+
+    res.json(produtos);
+  } catch (error) {
+    console.error("Erro ao carregar produtos da coleção:", error);
+    res.status(500).json({
+      mensagem: "Erro ao carregar produtos da coleção."
+    });
+  }
+});
+
+app.get("/api/orcamento/config", async (req, res) => {
+  try {
+    const calhas = await getProductsByCollectionAlias("calhas");
+
+    res.json({
+      tipos: CONFIG.tipos,
+      tiposCortina: CONFIG.tiposCortina,
+      calhas
+    });
+  } catch (error) {
+    console.error("Erro ao carregar configuração:", error);
+    res.status(500).json({
+      mensagem: "Erro ao carregar a configuração do orçamento."
+    });
+  }
 });
 
 app.post("/api/orcamento/enviar", async (req, res) => {
   try {
-    const erroValidacao = validarPayload(req.body);
+    const erroValidacao = await validarPayload(req.body);
 
     if (erroValidacao) {
       return res.status(400).json({
@@ -669,7 +765,7 @@ app.post("/api/orcamento/enviar", async (req, res) => {
       });
     }
 
-    const calc = calcularOrcamento(req.body);
+    const calc = await calcularOrcamento(req.body);
     const cliente = req.body.cliente;
     const pdfBuffer = await gerarPdfOrcamento(req.body, calc);
 
@@ -718,7 +814,6 @@ app.post("/api/orcamento/enviar", async (req, res) => {
     });
   } catch (error) {
     console.error("Erro ao enviar orçamento:", error);
-
     return res.status(500).json({
       mensagem: error.message || "Erro ao enviar o orçamento."
     });
