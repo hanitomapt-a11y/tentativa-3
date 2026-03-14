@@ -143,91 +143,189 @@ function isCortinado(tipo) {
   return tipo === "cortinado";
 }
 
-function getNomeColecaoPorTipo(tipo) {
-  if (tipo === "cortinado") return "Cortinado";
-  if (tipo === "estore") return "Estore";
-  if (tipo === "estore_japones") return "Estore Japonês";
+function normalizarTexto(valor) {
+  return String(valor || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function obterVariantesColecao(tipo) {
+  if (tipo === "cortinado") {
+    return [
+      "cortinado",
+      "cortinado",
+      "cortinados"
+    ];
+  }
+
+  if (tipo === "estore") {
+    return [
+      "estore",
+      "estore",
+      "estores"
+    ];
+  }
+
+  if (tipo === "estore_japones") {
+    return [
+      "estore japones",
+      "estore japones",
+      "estore japones",
+      "estore japoneses",
+      "estores japoneses",
+      "estore japones",
+      "estore japones",
+      "estore japoneses",
+      "estores japoneses",
+      "estore japones",
+      "estore japonês",
+      "estore japonês",
+      "estores japones"
+    ];
+  }
+
+  return [];
+}
+
+async function getTableColumns(tableName) {
+  const [rows] = await pool.query(`SHOW COLUMNS FROM \`${tableName}\``);
+  return rows.map(row => row.Field);
+}
+
+function pickColumn(columns, candidates) {
+  for (const candidate of candidates) {
+    if (columns.includes(candidate)) {
+      return candidate;
+    }
+  }
   return null;
 }
 
-async function getProductsByTipo(tipo) {
-  const nomeColecao = getNomeColecaoPorTipo(tipo);
+async function getSchemaMap() {
+  const collectionsColumns = await getTableColumns("collections");
+  const productsColumns = await getTableColumns("products");
+  const productImagesColumns = await getTableColumns("product_images");
 
-  if (!nomeColecao) {
+  const schema = {
+    collections: {
+      table: "collections",
+      id: pickColumn(collectionsColumns, ["id", "collection_id"]),
+      nome: pickColumn(collectionsColumns, ["name", "nome", "title", "titulo"]),
+      slug: pickColumn(collectionsColumns, ["slug", "handle", "url_slug"])
+    },
+
+    products: {
+      table: "products",
+      id: pickColumn(productsColumns, ["id", "product_id"]),
+      collectionId: pickColumn(productsColumns, ["collection_id", "collectionId", "category_id"]),
+      nome: pickColumn(productsColumns, ["name", "nome", "title", "titulo"]),
+      descricao: pickColumn(productsColumns, ["description", "descricao", "details", "detalhes"]),
+      preco: pickColumn(productsColumns, ["price", "preco", "price_m2", "preco_m2"])
+    },
+
+    productImages: {
+      table: "product_images",
+      id: pickColumn(productImagesColumns, ["id", "image_id"]),
+      productId: pickColumn(productImagesColumns, ["product_id", "productId"]),
+      imagem: pickColumn(productImagesColumns, ["image_url", "url", "image", "src", "path", "imagem"])
+    }
+  };
+
+  if (!schema.collections.id || !schema.collections.nome) {
+    throw new Error("Não foi possível identificar as colunas da tabela collections.");
+  }
+
+  if (!schema.products.id || !schema.products.collectionId || !schema.products.nome) {
+    throw new Error("Não foi possível identificar as colunas principais da tabela products.");
+  }
+
+  return schema;
+}
+
+async function getCollectionByTipo(tipo) {
+  const schema = await getSchemaMap();
+
+  const cols = schema.collections;
+  const sql = `
+    SELECT
+      \`${cols.id}\` AS id,
+      \`${cols.nome}\` AS nome
+      ${cols.slug ? `, \`${cols.slug}\` AS slug` : ""}
+    FROM \`${cols.table}\`
+  `;
+
+  const [rows] = await pool.query(sql);
+  const variantes = obterVariantesColecao(tipo).map(normalizarTexto);
+
+  const encontrada = rows.find(row => {
+    const nomeNorm = normalizarTexto(row.nome);
+    const slugNorm = normalizarTexto(row.slug || "");
+
+    return variantes.includes(nomeNorm) || variantes.includes(slugNorm);
+  });
+
+  return encontrada || null;
+}
+
+async function getProductsByTipo(tipo) {
+  const schema = await getSchemaMap();
+  const colecao = await getCollectionByTipo(tipo);
+
+  if (!colecao) {
     return [];
   }
 
-  const [rows] = await pool.query(
-    `
-    SELECT
-      p.id,
-      p.name,
-      p.description,
-      p.price,
+  const p = schema.products;
+  const pi = schema.productImages;
+
+  const descricaoSelect = p.descricao
+    ? `p.\`${p.descricao}\` AS descricao`
+    : `'' AS descricao`;
+
+  const precoSelect = p.preco
+    ? `p.\`${p.preco}\` AS preco`
+    : `0 AS preco`;
+
+  const imagemSelect = (pi.productId && pi.imagem && pi.id)
+    ? `
       (
-        SELECT pi.image_url
-        FROM product_images pi
-        WHERE pi.product_id = p.id
-        ORDER BY pi.id ASC
+        SELECT pi2.\`${pi.imagem}\`
+        FROM \`${pi.table}\` pi2
+        WHERE pi2.\`${pi.productId}\` = p.\`${p.id}\`
+        ORDER BY pi2.\`${pi.id}\` ASC
         LIMIT 1
       ) AS imagem
-    FROM products p
-    INNER JOIN collections c ON c.id = p.collection_id
-    WHERE c.name = ?
-    ORDER BY p.id DESC
-    `,
-    [nomeColecao]
-  );
+    `
+    : `'' AS imagem`;
+
+  const sql = `
+    SELECT
+      p.\`${p.id}\` AS id,
+      p.\`${p.nome}\` AS nome,
+      ${descricaoSelect},
+      ${precoSelect},
+      ${imagemSelect}
+    FROM \`${p.table}\` p
+    WHERE p.\`${p.collectionId}\` = ?
+    ORDER BY p.\`${p.id}\` DESC
+  `;
+
+  const [rows] = await pool.query(sql, [colecao.id]);
 
   return rows.map(row => ({
     id: row.id,
-    nome: row.name,
-    descricao: row.description || "",
-    precoM2: Number(row.price || 0),
+    nome: row.nome || "",
+    descricao: row.descricao || "",
+    precoM2: Number(row.preco || 0),
     imagem: row.imagem || ""
   }));
 }
 
 async function getProductByIdAndTipo(produtoId, tipo) {
-  const nomeColecao = getNomeColecaoPorTipo(tipo);
-
-  if (!nomeColecao) {
-    return null;
-  }
-
-  const [rows] = await pool.query(
-    `
-    SELECT
-      p.id,
-      p.name,
-      p.description,
-      p.price,
-      (
-        SELECT pi.image_url
-        FROM product_images pi
-        WHERE pi.product_id = p.id
-        ORDER BY pi.id ASC
-        LIMIT 1
-      ) AS imagem
-    FROM products p
-    INNER JOIN collections c ON c.id = p.collection_id
-    WHERE p.id = ? AND c.name = ?
-    LIMIT 1
-    `,
-    [produtoId, nomeColecao]
-  );
-
-  if (!rows.length) {
-    return null;
-  }
-
-  return {
-    id: rows[0].id,
-    nome: rows[0].name,
-    descricao: rows[0].description || "",
-    precoM2: Number(rows[0].price || 0),
-    imagem: rows[0].imagem || ""
-  };
+  const produtos = await getProductsByTipo(tipo);
+  return produtos.find(item => String(item.id) === String(produtoId)) || null;
 }
 
 async function validarPayload(body) {
@@ -283,7 +381,11 @@ async function validarPayload(body) {
 function calcularQuantidadeGanchos(tamanhoCalhaM) {
   let quantidade = tamanhoCalhaM / 0.065;
   quantidade = Math.floor(quantidade);
-  if (quantidade % 2 !== 0) quantidade += 1;
+
+  if (quantidade % 2 !== 0) {
+    quantidade += 1;
+  }
+
   return quantidade;
 }
 
@@ -390,7 +492,7 @@ async function calcularOrcamento(payload) {
       });
     }
 
-    total = linhas.reduce((acc, linha) => acc + linha.total, 0);
+    total = linhas.reduce((acc, linha) => acc + Number(linha.total || 0), 0);
 
     return {
       tipo,
@@ -467,7 +569,8 @@ function gerarPdfOrcamento(payload, calc) {
 
       doc.rect(x, y, w, h).stroke();
 
-      doc.font(bold ? "Helvetica-Bold" : "Helvetica")
+      doc
+        .font(bold ? "Helvetica-Bold" : "Helvetica")
         .fontSize(size)
         .text(text || "", x + padding, y + padding, {
           width: w - padding * 2,
@@ -479,7 +582,8 @@ function gerarPdfOrcamento(payload, calc) {
     function drawText(x, y, text, opts = {}) {
       const { size = 10, align = "left", width = 500, bold = false } = opts;
 
-      doc.font(bold ? "Helvetica-Bold" : "Helvetica")
+      doc
+        .font(bold ? "Helvetica-Bold" : "Helvetica")
         .fontSize(size)
         .text(text, x, y, { width, align });
     }
@@ -575,23 +679,32 @@ function gerarPdfOrcamento(payload, calc) {
     y += 14;
     drawText(88, y, "• Proposta válida pelo período de 7 dias.", { size: 9, width: 360 });
     y += 14;
-    drawText(88, y, "• Condições de pagamento: 30% de adjudicação ou superior se o cliente assim pretender (IBAN: PT50 0036 0032 9910 0361 4048 8), restante após conclusão dos trabalhos.", { size: 9, width: 360 });
+    drawText(
+      88,
+      y,
+      "• Condições de pagamento: 30% de adjudicação ou superior se o cliente assim pretender (IBAN: PT50 0036 0032 9910 0361 4048 8), restante após conclusão dos trabalhos.",
+      { size: 9, width: 360 }
+    );
     y += 28;
     drawText(88, y, "• Local de entrega: Obra do cliente.", { size: 9, width: 360 });
     y += 14;
     drawText(88, y, "• Prazo de entrega: A definir.", { size: 9, width: 360 });
 
     y += 26;
-    drawText(70, y, "Esperamos que o orçamento seja do seu agrado, agradecemos imenso a sua proposta de consulta.", {
-      size: 9,
-      width: 360
-    });
+    drawText(
+      70,
+      y,
+      "Esperamos que o orçamento seja do seu agrado, agradecemos imenso a sua proposta de consulta.",
+      { size: 9, width: 360 }
+    );
 
     y += 24;
-    drawText(70, y, "Sem outro assunto de momento subscrevemo-nos com consideração.", {
-      size: 9,
-      width: 360
-    });
+    drawText(
+      70,
+      y,
+      "Sem outro assunto de momento subscrevemo-nos com consideração.",
+      { size: 9, width: 360 }
+    );
 
     y += 34;
     drawText(centerX, y, "A Gerência", {
@@ -614,11 +727,16 @@ function gerarPdfOrcamento(payload, calc) {
       width: contentWidth
     });
 
-    drawText(secondPageLeft, 95, "Em caso de adjudicação, deverão V. Exas., devolver-nos este documento devidamente assinado.", {
-      size: 9,
-      width: secondPageBlockWidth * 0.74,
-      align: "left"
-    });
+    drawText(
+      secondPageLeft,
+      95,
+      "Em caso de adjudicação, deverão V. Exas., devolver-nos este documento devidamente assinado.",
+      {
+        size: 9,
+        width: secondPageBlockWidth * 0.74,
+        align: "left"
+      }
+    );
 
     drawText(centerX, 122, "O Cliente", {
       size: 10,
@@ -686,7 +804,8 @@ app.get("/api/collections/:tipo/products", async (req, res) => {
   } catch (error) {
     console.error("Erro ao buscar produtos da coleção:", error);
     return res.status(500).json({
-      mensagem: "Erro ao buscar produtos da coleção."
+      mensagem: "Erro ao buscar produtos da coleção.",
+      detalhe: error.message
     });
   }
 });
@@ -694,6 +813,7 @@ app.get("/api/collections/:tipo/products", async (req, res) => {
 app.post("/api/orcamento/enviar", async (req, res) => {
   try {
     const erroValidacao = await validarPayload(req.body);
+
     if (erroValidacao) {
       return res.status(400).json({
         mensagem: erroValidacao
