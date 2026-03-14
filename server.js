@@ -155,14 +155,12 @@ function obterVariantesColecao(tipo) {
   if (tipo === "cortinado") {
     return [
       "cortinado",
-      "cortinado",
       "cortinados"
     ];
   }
 
   if (tipo === "estore") {
     return [
-      "estore",
       "estore",
       "estores"
     ];
@@ -171,18 +169,11 @@ function obterVariantesColecao(tipo) {
   if (tipo === "estore_japones") {
     return [
       "estore japones",
-      "estore japones",
-      "estore japones",
+      "estore japonês",
       "estore japoneses",
       "estores japoneses",
-      "estore japones",
-      "estore japones",
-      "estore japoneses",
-      "estores japoneses",
-      "estore japones",
-      "estore japonês",
-      "estore japonês",
-      "estores japones"
+      "estores japones",
+      "estore japones"
     ];
   }
 
@@ -206,7 +197,14 @@ function pickColumn(columns, candidates) {
 async function getSchemaMap() {
   const collectionsColumns = await getTableColumns("collections");
   const productsColumns = await getTableColumns("products");
-  const productImagesColumns = await getTableColumns("product_images");
+
+  let productImagesColumns = [];
+  try {
+    productImagesColumns = await getTableColumns("product_images");
+  } catch (error) {
+    console.warn("Aviso: não foi possível ler a tabela product_images:", error.message);
+    productImagesColumns = [];
+  }
 
   const schema = {
     collections: {
@@ -234,11 +232,15 @@ async function getSchemaMap() {
   };
 
   if (!schema.collections.id || !schema.collections.nome) {
-    throw new Error("Não foi possível identificar as colunas da tabela collections.");
+    throw new Error(
+      `Tabela collections inválida. Colunas encontradas: ${collectionsColumns.join(", ")}`
+    );
   }
 
   if (!schema.products.id || !schema.products.collectionId || !schema.products.nome) {
-    throw new Error("Não foi possível identificar as colunas principais da tabela products.");
+    throw new Error(
+      `Tabela products inválida. Colunas encontradas: ${productsColumns.join(", ")}`
+    );
   }
 
   return schema;
@@ -246,8 +248,8 @@ async function getSchemaMap() {
 
 async function getCollectionByTipo(tipo) {
   const schema = await getSchemaMap();
-
   const cols = schema.collections;
+
   const sql = `
     SELECT
       \`${cols.id}\` AS id,
@@ -262,7 +264,6 @@ async function getCollectionByTipo(tipo) {
   const encontrada = rows.find(row => {
     const nomeNorm = normalizarTexto(row.nome);
     const slugNorm = normalizarTexto(row.slug || "");
-
     return variantes.includes(nomeNorm) || variantes.includes(slugNorm);
   });
 
@@ -311,6 +312,11 @@ async function getProductsByTipo(tipo) {
     WHERE p.\`${p.collectionId}\` = ?
     ORDER BY p.\`${p.id}\` DESC
   `;
+
+  console.log("Tipo pedido:", tipo);
+  console.log("Coleção encontrada:", colecao);
+  console.log("Schema detetado:", schema);
+  console.log("SQL produtos:", sql);
 
   const [rows] = await pool.query(sql, [colecao.id]);
 
@@ -569,8 +575,7 @@ function gerarPdfOrcamento(payload, calc) {
 
       doc.rect(x, y, w, h).stroke();
 
-      doc
-        .font(bold ? "Helvetica-Bold" : "Helvetica")
+      doc.font(bold ? "Helvetica-Bold" : "Helvetica")
         .fontSize(size)
         .text(text || "", x + padding, y + padding, {
           width: w - padding * 2,
@@ -582,8 +587,7 @@ function gerarPdfOrcamento(payload, calc) {
     function drawText(x, y, text, opts = {}) {
       const { size = 10, align = "left", width = 500, bold = false } = opts;
 
-      doc
-        .font(bold ? "Helvetica-Bold" : "Helvetica")
+      doc.font(bold ? "Helvetica-Bold" : "Helvetica")
         .fontSize(size)
         .text(text, x, y, { width, align });
     }
@@ -691,20 +695,16 @@ function gerarPdfOrcamento(payload, calc) {
     drawText(88, y, "• Prazo de entrega: A definir.", { size: 9, width: 360 });
 
     y += 26;
-    drawText(
-      70,
-      y,
-      "Esperamos que o orçamento seja do seu agrado, agradecemos imenso a sua proposta de consulta.",
-      { size: 9, width: 360 }
-    );
+    drawText(70, y, "Esperamos que o orçamento seja do seu agrado, agradecemos imenso a sua proposta de consulta.", {
+      size: 9,
+      width: 360
+    });
 
     y += 24;
-    drawText(
-      70,
-      y,
-      "Sem outro assunto de momento subscrevemo-nos com consideração.",
-      { size: 9, width: 360 }
-    );
+    drawText(70, y, "Sem outro assunto de momento subscrevemo-nos com consideração.", {
+      size: 9,
+      width: 360
+    });
 
     y += 34;
     drawText(centerX, y, "A Gerência", {
@@ -727,16 +727,11 @@ function gerarPdfOrcamento(payload, calc) {
       width: contentWidth
     });
 
-    drawText(
-      secondPageLeft,
-      95,
-      "Em caso de adjudicação, deverão V. Exas., devolver-nos este documento devidamente assinado.",
-      {
-        size: 9,
-        width: secondPageBlockWidth * 0.74,
-        align: "left"
-      }
-    );
+    drawText(secondPageLeft, 95, "Em caso de adjudicação, deverão V. Exas., devolver-nos este documento devidamente assinado.", {
+      size: 9,
+      width: secondPageBlockWidth * 0.74,
+      align: "left"
+    });
 
     drawText(centerX, 122, "O Cliente", {
       size: 10,
@@ -796,16 +791,59 @@ app.get("/api/orcamento/config", (req, res) => {
   res.json(CONFIG);
 });
 
+app.get("/api/debug/schema", async (req, res) => {
+  try {
+    const schema = await getSchemaMap();
+    res.json(schema);
+  } catch (error) {
+    res.status(500).json({
+      mensagem: "Erro ao ler schema.",
+      detalhe: error.message
+    });
+  }
+});
+
+app.get("/api/debug/collections", async (req, res) => {
+  try {
+    const schema = await getSchemaMap();
+    const cols = schema.collections;
+
+    const sql = `
+      SELECT
+        \`${cols.id}\` AS id,
+        \`${cols.nome}\` AS nome
+        ${cols.slug ? `, \`${cols.slug}\` AS slug` : ""}
+      FROM \`${cols.table}\`
+    `;
+
+    const [rows] = await pool.query(sql);
+
+    res.json({
+      schema,
+      rows
+    });
+  } catch (error) {
+    res.status(500).json({
+      mensagem: "Erro ao ler collections.",
+      detalhe: error.message
+    });
+  }
+});
+
 app.get("/api/collections/:tipo/products", async (req, res) => {
   try {
     const { tipo } = req.params;
     const produtos = await getProductsByTipo(tipo);
+
     return res.json(produtos);
   } catch (error) {
     console.error("Erro ao buscar produtos da coleção:", error);
+
     return res.status(500).json({
       mensagem: "Erro ao buscar produtos da coleção.",
-      detalhe: error.message
+      detalhe: error.message,
+      sqlMessage: error.sqlMessage || null,
+      code: error.code || null
     });
   }
 });
@@ -869,6 +907,7 @@ app.post("/api/orcamento/enviar", async (req, res) => {
     });
   } catch (error) {
     console.error("Erro ao enviar orçamento:", error);
+
     return res.status(500).json({
       mensagem: error.message || "Erro ao enviar o orçamento."
     });
