@@ -37,19 +37,19 @@ const pool = mysql.createPool({
 const CONFIG = {
   tipos: [
     {
-      id: "cortinados",
+      id: "cortinado",
       nome: "Cortinado",
       descricao: "Escolha tecido, tipo de cortina, calha e serviços.",
       imagem: `${API_URL}/imagens/tipos/cortinado.jpg`
     },
     {
-      id: "estores",
+      id: "estore",
       nome: "Estore",
       descricao: "Escolha o tecido e os serviços pretendidos.",
       imagem: `${API_URL}/imagens/tipos/estore.jpg`
     },
     {
-      id: "estore-japones",
+      id: "estore_japones",
       nome: "Estore Japonês",
       descricao: "Escolha o tecido e os serviços pretendidos.",
       imagem: `${API_URL}/imagens/tipos/estore-japones.jpg`
@@ -112,10 +112,6 @@ const CONFIG = {
   ]
 };
 
-function isCortinado(tipo) {
-  return tipo === "cortinados";
-}
-
 function encontrarTipo(id) {
   return CONFIG.tipos.find(item => item.id === id) || null;
 }
@@ -143,22 +139,21 @@ function formatQuantidade(valor) {
     : valor.toFixed(2).replace(".", ",");
 }
 
-async function getCollectionBySlug(slug) {
-  const [rows] = await pool.query(
-    `SELECT id, name, slug, image
-     FROM collections
-     WHERE slug = ?
-     LIMIT 1`,
-    [slug]
-  );
-
-  return rows[0] || null;
+function isCortinado(tipo) {
+  return tipo === "cortinado";
 }
 
-async function getProductsByCollectionSlug(slug) {
-  const collection = await getCollectionBySlug(slug);
+function getNomeColecaoPorTipo(tipo) {
+  if (tipo === "cortinado") return "Cortinado";
+  if (tipo === "estore") return "Estore";
+  if (tipo === "estore_japones") return "Estore Japonês";
+  return null;
+}
 
-  if (!collection) {
+async function getProductsByTipo(tipo) {
+  const nomeColecao = getNomeColecaoPorTipo(tipo);
+
+  if (!nomeColecao) {
     return [];
   }
 
@@ -173,14 +168,15 @@ async function getProductsByCollectionSlug(slug) {
         SELECT pi.image_url
         FROM product_images pi
         WHERE pi.product_id = p.id
-        ORDER BY pi.is_primary DESC, pi.id ASC
+        ORDER BY pi.id ASC
         LIMIT 1
-      ) AS image
+      ) AS imagem
     FROM products p
-    WHERE p.collection_id = ?
+    INNER JOIN collections c ON c.id = p.collection_id
+    WHERE c.name = ?
     ORDER BY p.id DESC
     `,
-    [collection.id]
+    [nomeColecao]
   );
 
   return rows.map(row => ({
@@ -188,14 +184,14 @@ async function getProductsByCollectionSlug(slug) {
     nome: row.name,
     descricao: row.description || "",
     precoM2: Number(row.price || 0),
-    imagem: row.image || ""
+    imagem: row.imagem || ""
   }));
 }
 
-async function getProductByIdAndCollectionSlug(produtoId, slug) {
-  const collection = await getCollectionBySlug(slug);
+async function getProductByIdAndTipo(produtoId, tipo) {
+  const nomeColecao = getNomeColecaoPorTipo(tipo);
 
-  if (!collection) {
+  if (!nomeColecao) {
     return null;
   }
 
@@ -210,17 +206,18 @@ async function getProductByIdAndCollectionSlug(produtoId, slug) {
         SELECT pi.image_url
         FROM product_images pi
         WHERE pi.product_id = p.id
-        ORDER BY pi.is_primary DESC, pi.id ASC
+        ORDER BY pi.id ASC
         LIMIT 1
-      ) AS image
+      ) AS imagem
     FROM products p
-    WHERE p.id = ? AND p.collection_id = ?
+    INNER JOIN collections c ON c.id = p.collection_id
+    WHERE p.id = ? AND c.name = ?
     LIMIT 1
     `,
-    [produtoId, collection.id]
+    [produtoId, nomeColecao]
   );
 
-  if (!rows[0]) {
+  if (!rows.length) {
     return null;
   }
 
@@ -229,7 +226,7 @@ async function getProductByIdAndCollectionSlug(produtoId, slug) {
     nome: rows[0].name,
     descricao: rows[0].description || "",
     precoM2: Number(rows[0].price || 0),
-    imagem: rows[0].image || ""
+    imagem: rows[0].imagem || ""
   };
 }
 
@@ -269,7 +266,7 @@ async function validarPayload(body) {
   if (Number(larguraCm) <= 0) return "Largura inválida.";
   if (Number(alturaCm) <= 0) return "Altura inválida.";
 
-  const produto = await getProductByIdAndCollectionSlug(produtoId, tipo);
+  const produto = await getProductByIdAndTipo(produtoId, tipo);
   if (!produto) return "Produto inválido.";
 
   if (isCortinado(tipo)) {
@@ -286,11 +283,7 @@ async function validarPayload(body) {
 function calcularQuantidadeGanchos(tamanhoCalhaM) {
   let quantidade = tamanhoCalhaM / 0.065;
   quantidade = Math.floor(quantidade);
-
-  if (quantidade % 2 !== 0) {
-    quantidade += 1;
-  }
-
+  if (quantidade % 2 !== 0) quantidade += 1;
   return quantidade;
 }
 
@@ -310,7 +303,7 @@ function calcularValorColocacao(tamanhoCalhaM) {
 
 async function calcularOrcamento(payload) {
   const tipo = encontrarTipo(payload.tipo);
-  const produto = await getProductByIdAndCollectionSlug(payload.produtoId, payload.tipo);
+  const produto = await getProductByIdAndTipo(payload.produtoId, payload.tipo);
   const tipoCortina = payload.tipoCortinaId ? encontrarTipoCortina(payload.tipoCortinaId) : null;
   const calha = payload.calhaId ? encontrarCalha(payload.calhaId) : null;
 
@@ -685,10 +678,10 @@ app.get("/api/orcamento/config", (req, res) => {
   res.json(CONFIG);
 });
 
-app.get("/api/collections/:slug/products", async (req, res) => {
+app.get("/api/collections/:tipo/products", async (req, res) => {
   try {
-    const { slug } = req.params;
-    const produtos = await getProductsByCollectionSlug(slug);
+    const { tipo } = req.params;
+    const produtos = await getProductsByTipo(tipo);
     return res.json(produtos);
   } catch (error) {
     console.error("Erro ao buscar produtos da coleção:", error);
