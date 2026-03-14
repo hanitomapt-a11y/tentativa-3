@@ -4,7 +4,6 @@ const express = require("express");
 const cors = require("cors");
 const nodemailer = require("nodemailer");
 const PDFDocument = require("pdfkit");
-const mysql = require("mysql2/promise");
 
 const app = express();
 
@@ -21,18 +20,6 @@ app.use(cors({
 app.use(express.json({ limit: "10mb" }));
 
 const API_URL = "https://api.guialar.net";
-
-const pool = mysql.createPool({
-  host: process.env.DB_HOST,
-  port: Number(process.env.DB_PORT || 3306),
-  user: process.env.DB_USER,
-  password: process.env.DB_PASS,
-  database: process.env.DB_NAME,
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
-  charset: "utf8mb4"
-});
 
 const CONFIG = {
   tipos: [
@@ -87,6 +74,52 @@ const CONFIG = {
     }
   ],
 
+  produtos: {
+    cortinado: [
+      {
+        id: "tec-cort-001",
+        nome: "Linho Natural",
+        descricao: "Tecido leve com acabamento natural.",
+        precoM2: 38,
+        imagem: `${API_URL}/imagens/produtos/cortinado-linho-natural.jpg`
+      },
+      {
+        id: "tec-cort-002",
+        nome: "Veludo Areia",
+        descricao: "Tecido mais encorpado e sofisticado.",
+        precoM2: 52,
+        imagem: `${API_URL}/imagens/produtos/cortinado-veludo-areia.jpg`
+      },
+      {
+        id: "tec-cort-003",
+        nome: "Blackout Soft",
+        descricao: "Maior bloqueio de luz.",
+        precoM2: 46,
+        imagem: `${API_URL}/imagens/produtos/cortinado-blackout-soft.jpg`
+      }
+    ],
+
+    estore: [
+      {
+        id: "tec-est-001",
+        nome: "Screen Branco",
+        descricao: "Boa entrada de luz com privacidade.",
+        precoM2: 34,
+        imagem: `${API_URL}/imagens/produtos/estore-screen-branco.jpg`
+      }
+    ],
+
+    estore_japones: [
+      {
+        id: "tec-jap-001",
+        nome: "Painel Pérola",
+        descricao: "Visual limpo para divisões modernas.",
+        precoM2: 41,
+        imagem: `${API_URL}/imagens/produtos/japones-perola.jpg`
+      }
+    ]
+  },
+
   calhas: [
     {
       id: "calha-001",
@@ -113,15 +146,19 @@ const CONFIG = {
 };
 
 function encontrarTipo(id) {
-  return CONFIG.tipos.find(item => item.id === id) || null;
+  return CONFIG.tipos.find((item) => item.id === id) || null;
+}
+
+function encontrarProduto(tipo, produtoId) {
+  return (CONFIG.produtos[tipo] || []).find((item) => item.id === produtoId) || null;
 }
 
 function encontrarTipoCortina(id) {
-  return CONFIG.tiposCortina.find(item => item.id === id) || null;
+  return CONFIG.tiposCortina.find((item) => item.id === id) || null;
 }
 
 function encontrarCalha(id) {
-  return CONFIG.calhas.find(item => item.id === id) || null;
+  return CONFIG.calhas.find((item) => item.id === id) || null;
 }
 
 function existeValor(v) {
@@ -139,202 +176,7 @@ function formatQuantidade(valor) {
     : valor.toFixed(2).replace(".", ",");
 }
 
-function isCortinado(tipo) {
-  return tipo === "cortinado";
-}
-
-function normalizarTexto(valor) {
-  return String(valor || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim();
-}
-
-function obterVariantesColecao(tipo) {
-  if (tipo === "cortinado") {
-    return [
-      "cortinado",
-      "cortinados"
-    ];
-  }
-
-  if (tipo === "estore") {
-    return [
-      "estore",
-      "estores"
-    ];
-  }
-
-  if (tipo === "estore_japones") {
-    return [
-      "estore japones",
-      "estore japonês",
-      "estore japoneses",
-      "estores japoneses",
-      "estores japones",
-      "estore japones"
-    ];
-  }
-
-  return [];
-}
-
-async function getTableColumns(tableName) {
-  const [rows] = await pool.query(`SHOW COLUMNS FROM \`${tableName}\``);
-  return rows.map(row => row.Field);
-}
-
-function pickColumn(columns, candidates) {
-  for (const candidate of candidates) {
-    if (columns.includes(candidate)) {
-      return candidate;
-    }
-  }
-  return null;
-}
-
-async function getSchemaMap() {
-  const collectionsColumns = await getTableColumns("collections");
-  const productsColumns = await getTableColumns("products");
-
-  let productImagesColumns = [];
-  try {
-    productImagesColumns = await getTableColumns("product_images");
-  } catch (error) {
-    console.warn("Aviso: não foi possível ler a tabela product_images:", error.message);
-    productImagesColumns = [];
-  }
-
-  const schema = {
-    collections: {
-      table: "collections",
-      id: pickColumn(collectionsColumns, ["id", "collection_id"]),
-      nome: pickColumn(collectionsColumns, ["name", "nome", "title", "titulo"]),
-      slug: pickColumn(collectionsColumns, ["slug", "handle", "url_slug"])
-    },
-
-    products: {
-      table: "products",
-      id: pickColumn(productsColumns, ["id", "product_id"]),
-      collectionId: pickColumn(productsColumns, ["collection_id", "collectionId", "category_id"]),
-      nome: pickColumn(productsColumns, ["name", "nome", "title", "titulo"]),
-      descricao: pickColumn(productsColumns, ["description", "descricao", "details", "detalhes"]),
-      preco: pickColumn(productsColumns, ["price", "preco", "price_m2", "preco_m2"])
-    },
-
-    productImages: {
-      table: "product_images",
-      id: pickColumn(productImagesColumns, ["id", "image_id"]),
-      productId: pickColumn(productImagesColumns, ["product_id", "productId"]),
-      imagem: pickColumn(productImagesColumns, ["image_url", "url", "image", "src", "path", "imagem"])
-    }
-  };
-
-  if (!schema.collections.id || !schema.collections.nome) {
-    throw new Error(
-      `Tabela collections inválida. Colunas encontradas: ${collectionsColumns.join(", ")}`
-    );
-  }
-
-  if (!schema.products.id || !schema.products.collectionId || !schema.products.nome) {
-    throw new Error(
-      `Tabela products inválida. Colunas encontradas: ${productsColumns.join(", ")}`
-    );
-  }
-
-  return schema;
-}
-
-async function getCollectionByTipo(tipo) {
-  const schema = await getSchemaMap();
-  const cols = schema.collections;
-
-  const sql = `
-    SELECT
-      \`${cols.id}\` AS id,
-      \`${cols.nome}\` AS nome
-      ${cols.slug ? `, \`${cols.slug}\` AS slug` : ""}
-    FROM \`${cols.table}\`
-  `;
-
-  const [rows] = await pool.query(sql);
-  const variantes = obterVariantesColecao(tipo).map(normalizarTexto);
-
-  const encontrada = rows.find(row => {
-    const nomeNorm = normalizarTexto(row.nome);
-    const slugNorm = normalizarTexto(row.slug || "");
-    return variantes.includes(nomeNorm) || variantes.includes(slugNorm);
-  });
-
-  return encontrada || null;
-}
-
-async function getProductsByTipo(tipo) {
-  const schema = await getSchemaMap();
-  const colecao = await getCollectionByTipo(tipo);
-
-  if (!colecao) {
-    return [];
-  }
-
-  const p = schema.products;
-  const pi = schema.productImages;
-
-  const descricaoSelect = p.descricao
-    ? `p.\`${p.descricao}\` AS descricao`
-    : `'' AS descricao`;
-
-  const precoSelect = p.preco
-    ? `p.\`${p.preco}\` AS preco`
-    : `0 AS preco`;
-
-  const imagemSelect = (pi.productId && pi.imagem && pi.id)
-    ? `
-      (
-        SELECT pi2.\`${pi.imagem}\`
-        FROM \`${pi.table}\` pi2
-        WHERE pi2.\`${pi.productId}\` = p.\`${p.id}\`
-        ORDER BY pi2.\`${pi.id}\` ASC
-        LIMIT 1
-      ) AS imagem
-    `
-    : `'' AS imagem`;
-
-  const sql = `
-    SELECT
-      p.\`${p.id}\` AS id,
-      p.\`${p.nome}\` AS nome,
-      ${descricaoSelect},
-      ${precoSelect},
-      ${imagemSelect}
-    FROM \`${p.table}\` p
-    WHERE p.\`${p.collectionId}\` = ?
-    ORDER BY p.\`${p.id}\` DESC
-  `;
-
-  console.log("Tipo pedido:", tipo);
-  console.log("Coleção encontrada:", colecao);
-  console.log("Schema detetado:", schema);
-  console.log("SQL produtos:", sql);
-
-  const [rows] = await pool.query(sql, [colecao.id]);
-
-  return rows.map(row => ({
-    id: row.id,
-    nome: row.nome || "",
-    descricao: row.descricao || "",
-    precoM2: Number(row.preco || 0),
-    imagem: row.imagem || ""
-  }));
-}
-
-async function getProductByIdAndTipo(produtoId, tipo) {
-  const produtos = await getProductsByTipo(tipo);
-  return produtos.find(item => String(item.id) === String(produtoId)) || null;
-}
-
-async function validarPayload(body) {
+function validarPayload(body) {
   const {
     tipo,
     produtoId,
@@ -367,13 +209,12 @@ async function validarPayload(body) {
   if (!emailValido) return "Email inválido.";
 
   if (!encontrarTipo(tipo)) return "Tipo inválido.";
+  if (!encontrarProduto(tipo, produtoId)) return "Produto inválido.";
+
   if (Number(larguraCm) <= 0) return "Largura inválida.";
   if (Number(alturaCm) <= 0) return "Altura inválida.";
 
-  const produto = await getProductByIdAndTipo(produtoId, tipo);
-  if (!produto) return "Produto inválido.";
-
-  if (isCortinado(tipo)) {
+  if (tipo === "cortinado") {
     if (!existeValor(tipoCortinaId)) return "Falta o tipo de cortina.";
     if (!existeValor(calhaId)) return "Falta a calha.";
     if (!existeValor(fixacaoCalha)) return "Falta a fixação da calha.";
@@ -409,9 +250,9 @@ function calcularValorColocacao(tamanhoCalhaM) {
   return 25;
 }
 
-async function calcularOrcamento(payload) {
+function calcularOrcamento(payload) {
   const tipo = encontrarTipo(payload.tipo);
-  const produto = await getProductByIdAndTipo(payload.produtoId, payload.tipo);
+  const produto = encontrarProduto(payload.tipo, payload.produtoId);
   const tipoCortina = payload.tipoCortinaId ? encontrarTipoCortina(payload.tipoCortinaId) : null;
   const calha = payload.calhaId ? encontrarCalha(payload.calhaId) : null;
 
@@ -422,7 +263,7 @@ async function calcularOrcamento(payload) {
   const linhas = [];
   let total = 0;
 
-  if (isCortinado(payload.tipo)) {
+  if (payload.tipo === "cortinado") {
     const tamanhoCalhaM = larguraM;
     const tamanhoCalhaCm = Number(payload.larguraCm);
 
@@ -547,7 +388,7 @@ function gerarPdfOrcamento(payload, calc) {
     });
 
     const chunks = [];
-    doc.on("data", chunk => chunks.push(chunk));
+    doc.on("data", (chunk) => chunks.push(chunk));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
 
@@ -565,7 +406,13 @@ function gerarPdfOrcamento(payload, calc) {
     const secondPageLeft = (pageWidth - secondPageBlockWidth) / 2;
 
     function drawCell(x, y, w, h, text, opts = {}) {
-      const { size = 9, align = "center", bold = false, fill = null, padding = 4 } = opts;
+      const {
+        size = 9,
+        align = "center",
+        bold = false,
+        fill = null,
+        padding = 4
+      } = opts;
 
       if (fill) {
         doc.save();
@@ -575,7 +422,8 @@ function gerarPdfOrcamento(payload, calc) {
 
       doc.rect(x, y, w, h).stroke();
 
-      doc.font(bold ? "Helvetica-Bold" : "Helvetica")
+      doc
+        .font(bold ? "Helvetica-Bold" : "Helvetica")
         .fontSize(size)
         .text(text || "", x + padding, y + padding, {
           width: w - padding * 2,
@@ -585,9 +433,15 @@ function gerarPdfOrcamento(payload, calc) {
     }
 
     function drawText(x, y, text, opts = {}) {
-      const { size = 10, align = "left", width = 500, bold = false } = opts;
+      const {
+        size = 10,
+        align = "left",
+        width = 500,
+        bold = false
+      } = opts;
 
-      doc.font(bold ? "Helvetica-Bold" : "Helvetica")
+      doc
+        .font(bold ? "Helvetica-Bold" : "Helvetica")
         .fontSize(size)
         .text(text, x, y, { width, align });
     }
@@ -612,7 +466,12 @@ function gerarPdfOrcamento(payload, calc) {
     doc.moveTo(225, 126).lineTo(300, 126).stroke();
 
     drawText(70, 144, "Exmo. Sr.(a)", { size: 10 });
-    drawText(350, 144, hoje, { size: 10, bold: true, width: 150, align: "right" });
+    drawText(350, 144, hoje, {
+      size: 10,
+      bold: true,
+      width: 150,
+      align: "right"
+    });
 
     drawText(
       70,
@@ -695,16 +554,20 @@ function gerarPdfOrcamento(payload, calc) {
     drawText(88, y, "• Prazo de entrega: A definir.", { size: 9, width: 360 });
 
     y += 26;
-    drawText(70, y, "Esperamos que o orçamento seja do seu agrado, agradecemos imenso a sua proposta de consulta.", {
-      size: 9,
-      width: 360
-    });
+    drawText(
+      70,
+      y,
+      "Esperamos que o orçamento seja do seu agrado, agradecemos imenso a sua proposta de consulta.",
+      { size: 9, width: 360 }
+    );
 
     y += 24;
-    drawText(70, y, "Sem outro assunto de momento subscrevemo-nos com consideração.", {
-      size: 9,
-      width: 360
-    });
+    drawText(
+      70,
+      y,
+      "Sem outro assunto de momento subscrevemo-nos com consideração.",
+      { size: 9, width: 360 }
+    );
 
     y += 34;
     drawText(centerX, y, "A Gerência", {
@@ -727,11 +590,16 @@ function gerarPdfOrcamento(payload, calc) {
       width: contentWidth
     });
 
-    drawText(secondPageLeft, 95, "Em caso de adjudicação, deverão V. Exas., devolver-nos este documento devidamente assinado.", {
-      size: 9,
-      width: secondPageBlockWidth * 0.74,
-      align: "left"
-    });
+    drawText(
+      secondPageLeft,
+      95,
+      "Em caso de adjudicação, deverão V. Exas., devolver-nos este documento devidamente assinado.",
+      {
+        size: 9,
+        width: secondPageBlockWidth * 0.74,
+        align: "left"
+      }
+    );
 
     drawText(centerX, 122, "O Cliente", {
       size: 10,
@@ -791,66 +659,9 @@ app.get("/api/orcamento/config", (req, res) => {
   res.json(CONFIG);
 });
 
-app.get("/api/debug/schema", async (req, res) => {
-  try {
-    const schema = await getSchemaMap();
-    res.json(schema);
-  } catch (error) {
-    res.status(500).json({
-      mensagem: "Erro ao ler schema.",
-      detalhe: error.message
-    });
-  }
-});
-
-app.get("/api/debug/collections", async (req, res) => {
-  try {
-    const schema = await getSchemaMap();
-    const cols = schema.collections;
-
-    const sql = `
-      SELECT
-        \`${cols.id}\` AS id,
-        \`${cols.nome}\` AS nome
-        ${cols.slug ? `, \`${cols.slug}\` AS slug` : ""}
-      FROM \`${cols.table}\`
-    `;
-
-    const [rows] = await pool.query(sql);
-
-    res.json({
-      schema,
-      rows
-    });
-  } catch (error) {
-    res.status(500).json({
-      mensagem: "Erro ao ler collections.",
-      detalhe: error.message
-    });
-  }
-});
-
-app.get("/api/collections/:tipo/products", async (req, res) => {
-  try {
-    const { tipo } = req.params;
-    const produtos = await getProductsByTipo(tipo);
-
-    return res.json(produtos);
-  } catch (error) {
-    console.error("Erro ao buscar produtos da coleção:", error);
-
-    return res.status(500).json({
-      mensagem: "Erro ao buscar produtos da coleção.",
-      detalhe: error.message,
-      sqlMessage: error.sqlMessage || null,
-      code: error.code || null
-    });
-  }
-});
-
 app.post("/api/orcamento/enviar", async (req, res) => {
   try {
-    const erroValidacao = await validarPayload(req.body);
+    const erroValidacao = validarPayload(req.body);
 
     if (erroValidacao) {
       return res.status(400).json({
@@ -858,7 +669,7 @@ app.post("/api/orcamento/enviar", async (req, res) => {
       });
     }
 
-    const calc = await calcularOrcamento(req.body);
+    const calc = calcularOrcamento(req.body);
     const cliente = req.body.cliente;
     const pdfBuffer = await gerarPdfOrcamento(req.body, calc);
 
