@@ -140,14 +140,13 @@ async function obterProdutosPorCollectionSlug(slug) {
       p.stock_qty,
       p.main_image,
       p.is_active,
-      p.sort_order,
       c.slug AS collection_slug
     FROM products p
     INNER JOIN collections c ON c.id = p.collection_id
     WHERE c.slug = ?
       AND c.is_active = 1
       AND p.is_active = 1
-    ORDER BY p.sort_order ASC, p.id ASC
+    ORDER BY p.id ASC
     `,
     [slug]
   );
@@ -668,7 +667,24 @@ app.get("/", async (req, res) => {
     console.error("Erro na verificação da base de dados:", error);
     res.status(500).json({
       ok: false,
-      mensagem: "API ativa, mas sem ligação à base de dados."
+      mensagem: "API ativa, mas sem ligação à base de dados.",
+      erro: error.message
+    });
+  }
+});
+
+app.get("/api/db-test", async (req, res) => {
+  try {
+    const [rows] = await pool.query("SELECT 1 AS ok");
+    return res.json({
+      ok: true,
+      rows
+    });
+  } catch (error) {
+    console.error("Erro DB TEST:", error);
+    return res.status(500).json({
+      ok: false,
+      erro: error.message
     });
   }
 });
@@ -680,12 +696,16 @@ app.get("/api/orcamento/config", (req, res) => {
 app.get("/api/collections/:slug/products", async (req, res) => {
   try {
     const { slug } = req.params;
+    console.log("A pedir coleção:", slug);
+
     const produtos = await obterProdutosPorCollectionSlug(slug);
+
     return res.json(produtos);
   } catch (error) {
     console.error("Erro ao obter produtos da coleção:", error);
     return res.status(500).json({
-      mensagem: "Erro ao obter produtos da coleção."
+      mensagem: "Erro ao obter produtos da coleção.",
+      erro: error.message
     });
   }
 });
