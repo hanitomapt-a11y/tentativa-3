@@ -40,7 +40,7 @@ const CONFIG = {
       id: "estore_japones",
       nome: "Estore Japonês",
       descricao: "Escolha o produto e os serviços pretendidos.",
-      imagem: `${API_URL}/imagens/colecoes/estore_japones.jpg`
+      imagem: `${API_URL}/imagens/tipos/estore_japones.jpg`
     }
   ],
 
