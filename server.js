@@ -40,7 +40,7 @@ const CONFIG = {
       id: "estore_japones",
       nome: "Estore Japonês",
       descricao: "Escolha o produto e os serviços pretendidos.",
-      imagem: `guialar.net/imagens/colecoes/estore_japones.jpg`
+      imagem: `${API_URL}/imagens/colecoes/estore_japones.jpg`
     }
   ],
 
